@@ -42,6 +42,8 @@ if(BUILD_TESTING)
     target_link_libraries(test_types robot_sdk_core)
     ament_add_gtest(test_latest_value_cache test/test_latest_value_cache.cpp)
     target_link_libraries(test_latest_value_cache robot_sdk_core)
+    ament_add_gtest(test_config test/test_config.cpp)
+    target_link_libraries(test_config robot_sdk_core)
 endif()
 
 ament_package()

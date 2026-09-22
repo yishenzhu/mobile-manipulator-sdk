@@ -19,7 +19,7 @@ public:
       std::lock_guard<std::mutex> lock(mutex_);
       value_ = value;
       ++sequence_;
-    } //
+    } // 这个额外作用域是故意的：让锁在这里释放，之后再 notify
     cv_.notify_all();
   }
 
