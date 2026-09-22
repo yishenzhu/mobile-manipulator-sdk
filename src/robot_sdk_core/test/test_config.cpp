@@ -65,6 +65,20 @@ TEST(ConfigTest, ResolveHandlesRootNamespaceWithoutDoubleSlash) {
   }
 }
 
+TEST(ConfigTest, NormalizeNamespaceProducesCanonicalForm) {
+  // ROS 2 规则：namespace 不能以 '/' 结尾，除非它只有 '/'。
+  // 违反的例子 "/robot1/" 会让 rclcpp::Node 抛 InvalidNamespaceException，
+  // 也就是节点根本建不起来 —— 所以这个函数是安全网。
+  EXPECT_EQ(normalizeNamespace(""), "");
+  EXPECT_EQ(normalizeNamespace("robot1"), "/robot1");
+  EXPECT_EQ(normalizeNamespace("/robot1"), "/robot1");
+  EXPECT_EQ(normalizeNamespace("/robot1/"), "/robot1");
+  EXPECT_EQ(normalizeNamespace("robot1///"), "/robot1");
+  EXPECT_EQ(normalizeNamespace("/"), "");    // 根 → 空串（等价）
+  EXPECT_EQ(normalizeNamespace("//"), "");   // 非法输入 → 合法结果
+  EXPECT_EQ(normalizeNamespace("///"), "");
+}
+
 /// fromNode 需要一个真的 rclcpp::Node，所以要初始化 rclcpp。
 /// 注意用 SetUpTestSuite / TearDownTestSuite（整个 fixture 各一次），
 /// 而不是 SetUp / TearDown（每个 TEST_F 各一次）——
@@ -130,4 +144,30 @@ TEST_F(ConfigNodeTest, ReadsEveryParameterGroup) {
   // 没覆盖的组保持默认
   EXPECT_EQ(cfg.status.get_status_service, "get_robot_status");
   EXPECT_EQ(cfg.perception.imu_topic, "imu");
+}
+
+TEST_F(ConfigNodeTest, NormalizedNamespaceIsAcceptedByRclcpp) {
+  // 决定性验证：归一化后的结果必须是 rclcpp 能接受的。
+  // 否则节点构造会抛 InvalidNamespaceException —— 整个 SDK 起不来。
+  // 对照组："/robot1/" 和 "//" 原样传给 rclcpp 是会抛异常的。
+  int index = 0;
+  for (const std::string raw : {"robot1", "/robot1", "/robot1/", "robot1///", "/", "//"}) {
+    const std::string ns = normalizeNamespace(raw);
+    rclcpp::NodeOptions options;
+    EXPECT_NO_THROW({
+      auto node = std::make_shared<rclcpp::Node>("ns_check_" + std::to_string(index), ns, options);
+      node.reset();
+    }) << "raw = " << raw << ", normalized = " << ns;
+    ++index;
+  }
+}
+
+/// 反向验证：证明"为什么必须有 normalizeNamespace"。
+/// 这条测试故意传入非法命名空间，断言它确实会抛 ——
+/// 如果哪天 rclcpp 变宽松了，这条会失败，提醒我们这个安全网可以重新评估。
+TEST_F(ConfigNodeTest, RawTrailingSlashNamespaceThrows) {
+  rclcpp::NodeOptions options;
+  EXPECT_THROW(std::make_shared<rclcpp::Node>("ns_bad_trailing", "/robot1/", options),
+               std::exception);
+  EXPECT_THROW(std::make_shared<rclcpp::Node>("ns_bad_double", "//", options), std::exception);
 }

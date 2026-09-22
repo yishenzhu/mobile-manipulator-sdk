@@ -8,6 +8,16 @@
 
 namespace robot_sdk {
 
+/// 把命名空间规范化为 ROS 2 要求的规范形式：
+///   - 非空则保证带前导 '/'   （"robot1"    → "/robot1"）
+///   - 去掉全部尾部 '/'        （"/robot1/"  → "/robot1"）
+///   - 只由 '/' 组成的输入归一成空串（表示根命名空间）
+///
+/// ROS 2 的规则是「namespace must not end with a '/', unless only a '/'」，
+/// 违反它的输入会让 rclcpp::Node 构造直接抛 InvalidNamespaceException。
+/// 配置由人手写，所以必须在这里兜住。
+std::string normalizeNamespace(const std::string& ns);
+
 /// 每个字段都有合理默认值，客户可以从 `RobotConfig{}` 开始，
 /// 只覆盖本次部署真正不同的那几项。
 /// 配置之后也可以从 ROS 参数读入（见 RobotConfig::fromNode），

@@ -103,26 +103,34 @@ RobotConfig RobotConfig::fromNode(rclcpp::Node &node) {
   return cfg;
 }
 
+std::string normalizeNamespace(const std::string &ns) {
+  if (ns.empty()) {
+    return ns;
+  }
+  std::string out = ns;
+  if (out.front() != '/') {
+    out.insert(out.begin(), '/'); // "robot1" → "/robot1"
+  }
+  // 削掉全部尾部斜杠。允许削成空串 —— 只由 '/' 组成的输入表示根命名空间，
+  // 而 ROS 2 拒绝 "//"，只接受 "/"（等价于根）。
+  while (!out.empty() && out.back() == '/') {
+    out.pop_back();
+  }
+  return out;
+}
+
 std::string RobotConfig::resolve(const std::string &relative_name) const {
   // 空名或绝对名：原样返回，不做任何拼接。
   if (relative_name.empty() || relative_name.front() == '/') {
     return relative_name;
   }
-  // 没有配置命名空间：保持相对名，由 ROS 的节点命名空间去解析。
+  // 注意：robot_namespace 为**空**（未配置）与为 "/"（显式指定根）语义不同 ——
+  // 前者保持相对名、交给 ROS 按节点命名空间解析；后者要拼成绝对名。
+  // 所以这个判断必须放在 normalizeNamespace 之前（它会把 "/" 归一成 ""）。
   if (robot_namespace.empty()) {
     return relative_name;
   }
-
-  std::string ns = robot_namespace;
-  if (ns.front() != '/') {
-    ns.insert(ns.begin(), '/'); // "robot1" → "/robot1"
-  }
-  // 削掉全部尾部斜杠。注意要允许削成空串 —— "/" 削空后正好表示"根命名空间"，
-  // 下面拼接时自然得到 "/scan"，而不会变成非法的 "//scan"。
-  while (!ns.empty() && ns.back() == '/') {
-    ns.pop_back();
-  }
-  return ns + "/" + relative_name;
+  return normalizeNamespace(robot_namespace) + "/" + relative_name;
 }
 
 } // namespace robot_sdk

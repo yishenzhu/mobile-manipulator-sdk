@@ -23,6 +23,7 @@ find_package(rclcpp REQUIRED)
 # SHARED 库：需要编译源码，产出 librobot_sdk_core.so。
 add_library(robot_sdk_core SHARED
     src/config.cpp
+    src/runtime.cpp
 )
 target_compile_features(robot_sdk_core PUBLIC cxx_std_17)
 # PUBLIC = 编译这个库自己要用 + 下游使用者也要用
