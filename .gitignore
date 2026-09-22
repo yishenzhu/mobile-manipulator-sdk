@@ -1,0 +1,9 @@
+/build
+/install
+/log
+.clangd
+.localrc
+学习笔记.md
+.cache/
+.commandcode/
+.vscode

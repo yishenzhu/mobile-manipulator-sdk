@@ -1,0 +1,16 @@
+# 硬件无关的关节空间运动目标。把客户与底层的 MoveIt / ros2_control
+# action 接口隔离开，因此运动后端可以被替换而不破坏客户代码。
+
+# Goal
+sensor_msgs/JointState target
+float32 max_velocity
+float32 max_acceleration
+---
+# Result
+bool success
+float32 final_position_error
+string message
+---
+# Feedback
+sensor_msgs/JointState current
+float32 completion_percentage

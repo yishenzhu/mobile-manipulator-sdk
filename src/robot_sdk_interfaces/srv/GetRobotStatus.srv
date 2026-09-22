@@ -1,0 +1,11 @@
+# 同步状态查询。与流式的状态 topic 互补，
+# 供偏好"请求/响应"风格的客户使用。
+
+# Request
+bool include_joint_states
+---
+# Response
+bool success
+string message
+RobotStatus status
+sensor_msgs/JointState joint_states

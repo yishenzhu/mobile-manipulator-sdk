@@ -1,0 +1,18 @@
+# 硬件无关的导航目标。客户依赖本 action 而非 nav2_msgs，
+# 因此导航后端可以被替换而不破坏客户代码。
+
+# Goal
+geometry_msgs/PoseStamped target_pose
+float32 max_speed
+bool avoid_obstacles
+---
+# Result
+bool success
+float32 final_distance_error
+string message
+---
+# Feedback
+geometry_msgs/PoseStamped current_pose
+float32 distance_remaining
+float32 estimated_time_remaining
+string current_state

@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<package format="3">
+    <name>robot_sdk_core</name>
+    <version>0.1.0</version>
+    <description>
+    Robot SDK 的 C++ 核心：把 ROS 2 的 topic/service/action/节点生命周期/TF
+    封装到 navigation、motion、perception、status 四个 API 之下。
+    </description>
+    <maintainer email="3464428214@qq.com">Robot SDK</maintainer>
+    <license>Apache-2.0</license>
+
+    <buildtool_depend>ament_cmake</buildtool_depend>
+    <depend>geometry_msgs</depend>
+    <depend>tf2</depend>
+    <!-- 只在跑测试时需要 -->
+    <test_depend>ament_cmake_gtest</test_depend>
+
+    <export>
+    <build_type>ament_cmake</build_type>
+    </export>
+</package>
