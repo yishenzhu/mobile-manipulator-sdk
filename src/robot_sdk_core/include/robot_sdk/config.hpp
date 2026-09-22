@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 
+#include <rclcpp/rclcpp.hpp>
+
 namespace robot_sdk {
 
 /// 每个字段都有合理默认值，客户可以从 `RobotConfig{}` 开始，
@@ -60,6 +62,15 @@ struct RobotConfig {
   MotionConfig motion{};
   PerceptionConfig perception{};
   StatusConfig status{};
+
+  /// 从 `node` 上声明的 ROS 参数填充配置。
+  /// 参数名镜像结构体路径，例如 `navigation.global_frame`。
+  /// 这样配置就能被 launch 文件覆盖，不用改代码重编。
+  static RobotConfig fromNode(rclcpp::Node& node);
+
+  /// 把相对话题/动作/服务名解析到 robot_namespace 之下。
+  /// 绝对名（以 '/' 开头）原样返回。
+  std::string resolve(const std::string& relative_name) const;
 };
 
 }  // namespace robot_sdk

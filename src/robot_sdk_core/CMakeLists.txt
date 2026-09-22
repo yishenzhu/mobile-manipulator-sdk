@@ -16,20 +16,37 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(tf2 REQUIRED)
+find_package(rclcpp REQUIRED)
 
-# INTERFACE 库：本身不产出 .so，只负责把 include 路径"传播"给使用者。
-# 等后面加了 .cpp，再换成 SHARED 库。
-add_library(robot_sdk_core INTERFACE)
-target_include_directories(robot_sdk_core INTERFACE
+# 有 .cpp 了，所以从 INTERFACE 库升级为真正的 SHARED 库（会产出 .so）。
+# INTERFACE 库：不产出二进制，只负责传播 include 路径（纯头文件库）。
+# SHARED 库：需要编译源码，产出 librobot_sdk_core.so。
+add_library(robot_sdk_core SHARED
+    src/config.cpp
+)
+target_compile_features(robot_sdk_core PUBLIC cxx_std_17)
+# PUBLIC = 编译这个库自己要用 + 下游使用者也要用
+target_include_directories(robot_sdk_core PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
 )
-# INTERFACE 库用 INTERFACE 作用域把依赖传播给使用者
-ament_target_dependencies(robot_sdk_core INTERFACE geometry_msgs tf2)
-ament_export_dependencies(geometry_msgs tf2)
+ament_target_dependencies(robot_sdk_core geometry_msgs tf2 rclcpp)
 
+# install(TARGETS) 把编译产物装进 install/；
+# EXPORT 让别的包能通过 find_package 找到并链接它。
+install(TARGETS robot_sdk_core
+    EXPORT export_${PROJECT_NAME}
+    ARCHIVE DESTINATION lib
+    LIBRARY DESTINATION lib
+    RUNTIME DESTINATION bin
+)
 install(DIRECTORY include/ DESTINATION include)
+
+# HAS_LIBRARY_TARGET 是必须的：没有它，下游只拿到 include 路径，
+# 链接时会 undefined reference。
+ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
 ament_export_include_directories(include)
+ament_export_dependencies(geometry_msgs tf2 rclcpp)
 
 if(BUILD_TESTING)
     find_package(ament_cmake_gtest REQUIRED)

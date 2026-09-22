@@ -10,6 +10,7 @@
     <license>Apache-2.0</license>
 
     <buildtool_depend>ament_cmake</buildtool_depend>
+    <depend>rclcpp</depend>
     <depend>geometry_msgs</depend>
     <depend>tf2</depend>
     <!-- 只在跑测试时需要 -->
