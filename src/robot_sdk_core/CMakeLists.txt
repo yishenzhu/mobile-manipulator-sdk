@@ -20,6 +20,7 @@ find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(robot_sdk_interfaces REQUIRED)
 
 # 有 .cpp 了，所以从 INTERFACE 库升级为真正的 SHARED 库（会产出 .so）。
 # INTERFACE 库：不产出二进制，只负责传播 include 路径（纯头文件库）。
@@ -29,6 +30,7 @@ add_library(robot_sdk_core SHARED
     src/runtime.cpp
     src/transform.cpp
     src/perception_api.cpp
+    src/status_api.cpp
 )
 target_compile_features(robot_sdk_core PUBLIC cxx_std_17)
 # PUBLIC = 编译这个库自己要用 + 下游使用者也要用
@@ -37,7 +39,7 @@ target_include_directories(robot_sdk_core PUBLIC
     $<INSTALL_INTERFACE:include>
 )
 ament_target_dependencies(robot_sdk_core
-    geometry_msgs sensor_msgs tf2 tf2_ros tf2_geometry_msgs rclcpp)
+    geometry_msgs sensor_msgs tf2 tf2_ros tf2_geometry_msgs rclcpp robot_sdk_interfaces)
 
 # install(TARGETS) 把编译产物装进 install/；
 # EXPORT 让别的包能通过 find_package 找到并链接它。
@@ -53,7 +55,8 @@ install(DIRECTORY include/ DESTINATION include)
 # 链接时会 undefined reference。
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
 ament_export_include_directories(include)
-ament_export_dependencies(geometry_msgs sensor_msgs tf2 tf2_ros tf2_geometry_msgs rclcpp)
+ament_export_dependencies(
+    geometry_msgs sensor_msgs tf2 tf2_ros tf2_geometry_msgs rclcpp robot_sdk_interfaces)
 
 if(BUILD_TESTING)
     find_package(ament_cmake_gtest REQUIRED)
