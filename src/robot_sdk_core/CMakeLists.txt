@@ -67,6 +67,9 @@ if(BUILD_TESTING)
     target_link_libraries(test_config robot_sdk_core)
     ament_add_gtest(test_transform test/test_transform.cpp)
     target_link_libraries(test_transform robot_sdk_core)
+    # 这条顺带充当 action_util.hpp 的自包含性测试 —— 它不 include 任何别的 SDK 头文件
+    ament_add_gtest(test_action_util test/test_action_util.cpp)
+    target_link_libraries(test_action_util robot_sdk_core)
 endif()
 
 ament_package()
