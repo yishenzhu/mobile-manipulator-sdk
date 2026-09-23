@@ -16,6 +16,8 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(tf2 REQUIRED)
+find_package(tf2_ros REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
 
 # 有 .cpp 了，所以从 INTERFACE 库升级为真正的 SHARED 库（会产出 .so）。
@@ -24,6 +26,7 @@ find_package(rclcpp REQUIRED)
 add_library(robot_sdk_core SHARED
     src/config.cpp
     src/runtime.cpp
+    src/transform.cpp
 )
 target_compile_features(robot_sdk_core PUBLIC cxx_std_17)
 # PUBLIC = 编译这个库自己要用 + 下游使用者也要用
@@ -31,7 +34,7 @@ target_include_directories(robot_sdk_core PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
 )
-ament_target_dependencies(robot_sdk_core geometry_msgs tf2 rclcpp)
+ament_target_dependencies(robot_sdk_core geometry_msgs tf2 tf2_ros tf2_geometry_msgs rclcpp)
 
 # install(TARGETS) 把编译产物装进 install/；
 # EXPORT 让别的包能通过 find_package 找到并链接它。
@@ -47,7 +50,7 @@ install(DIRECTORY include/ DESTINATION include)
 # 链接时会 undefined reference。
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
 ament_export_include_directories(include)
-ament_export_dependencies(geometry_msgs tf2 rclcpp)
+ament_export_dependencies(geometry_msgs tf2 tf2_ros tf2_geometry_msgs rclcpp)
 
 if(BUILD_TESTING)
     find_package(ament_cmake_gtest REQUIRED)
@@ -62,6 +65,8 @@ if(BUILD_TESTING)
     target_link_libraries(test_latest_value_cache robot_sdk_core)
     ament_add_gtest(test_config test/test_config.cpp)
     target_link_libraries(test_config robot_sdk_core)
+    ament_add_gtest(test_transform test/test_transform.cpp)
+    target_link_libraries(test_transform robot_sdk_core)
 endif()
 
 ament_package()

@@ -13,6 +13,8 @@
     <depend>rclcpp</depend>
     <depend>geometry_msgs</depend>
     <depend>tf2</depend>
+    <depend>tf2_ros</depend>
+    <depend>tf2_geometry_msgs</depend>
     <!-- 只在跑测试时需要 -->
     <test_depend>ament_cmake_gtest</test_depend>
 
