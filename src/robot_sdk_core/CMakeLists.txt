@@ -15,6 +15,7 @@ endif()
 
 find_package(ament_cmake REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
@@ -34,7 +35,8 @@ target_include_directories(robot_sdk_core PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
 )
-ament_target_dependencies(robot_sdk_core geometry_msgs tf2 tf2_ros tf2_geometry_msgs rclcpp)
+ament_target_dependencies(robot_sdk_core
+    geometry_msgs sensor_msgs tf2 tf2_ros tf2_geometry_msgs rclcpp)
 
 # install(TARGETS) 把编译产物装进 install/；
 # EXPORT 让别的包能通过 find_package 找到并链接它。
@@ -50,7 +52,7 @@ install(DIRECTORY include/ DESTINATION include)
 # 链接时会 undefined reference。
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
 ament_export_include_directories(include)
-ament_export_dependencies(geometry_msgs tf2 tf2_ros tf2_geometry_msgs rclcpp)
+ament_export_dependencies(geometry_msgs sensor_msgs tf2 tf2_ros tf2_geometry_msgs rclcpp)
 
 if(BUILD_TESTING)
     find_package(ament_cmake_gtest REQUIRED)
@@ -70,6 +72,8 @@ if(BUILD_TESTING)
     # 这条顺带充当 action_util.hpp 的自包含性测试 —— 它不 include 任何别的 SDK 头文件
     ament_add_gtest(test_action_util test/test_action_util.cpp)
     target_link_libraries(test_action_util robot_sdk_core)
+    ament_add_gtest(test_perception_helpers test/test_perception_helpers.cpp)
+    target_link_libraries(test_perception_helpers robot_sdk_core)
 endif()
 
 ament_package()
