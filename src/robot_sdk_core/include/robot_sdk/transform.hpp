@@ -17,15 +17,17 @@ namespace robot_sdk {
 
 /// tf2 的薄封装，但把错误模型换掉了。
 ///
-/// 客户永远不该被迫去 catch tf2 的异常、也不该操心 buffer 的时序：
+/// 客户永远不该被迫去 catch tf2 的异常，也不该操心 buffer 的时序：
 /// 每个方法都返回 Result，并且最多等待 `timeout` 让变换变得可用。
 ///
-/// **这个类的本质是"错误模型的适配层"** ——
-/// tf2 用异常报错，SDK 用 Result，这里就是两者的接缝。
+/// `spin_thread` 为什么取 false（含一个实测到的析构陷阱）见 `学习笔记.md` 附录 C。
 class TransformManager {
  public:
   using Duration = std::chrono::duration<double>;
 
+  /// 内部会给 /tf、/tf_static 建一条**独占的** MutuallyExclusive 回调组 ——
+  /// 与 tf2 在 spin_thread=true 时的做法一致：TF 需要的是"不被别人堵"，
+  /// 不需要和自己并发。理由见 学习笔记.md 附录 C。
   explicit TransformManager(const rclcpp::Node::SharedPtr& node);
 
   /// 求 source_frame 在 target_frame 下的位姿。
@@ -48,6 +50,9 @@ class TransformManager {
 
  private:
   std::shared_ptr<tf2_ros::Buffer> buffer_;
+  /// /tf 的专用车道。**必须自己持有强引用** —— 节点和执行器都只存 weak_ptr，
+  /// 组一旦析构，订阅回调会静默地再也不被调度（不报错、不警告）。
+  rclcpp::CallbackGroup::SharedPtr callback_group_;
   std::shared_ptr<tf2_ros::TransformListener> listener_;
 };
 

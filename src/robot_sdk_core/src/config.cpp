@@ -119,18 +119,4 @@ std::string normalizeNamespace(const std::string &ns) {
   return out;
 }
 
-std::string RobotConfig::resolve(const std::string &relative_name) const {
-  // 空名或绝对名：原样返回，不做任何拼接。
-  if (relative_name.empty() || relative_name.front() == '/') {
-    return relative_name;
-  }
-  // 注意：robot_namespace 为**空**（未配置）与为 "/"（显式指定根）语义不同 ——
-  // 前者保持相对名、交给 ROS 按节点命名空间解析；后者要拼成绝对名。
-  // 所以这个判断必须放在 normalizeNamespace 之前（它会把 "/" 归一成 ""）。
-  if (robot_namespace.empty()) {
-    return relative_name;
-  }
-  return normalizeNamespace(robot_namespace) + "/" + relative_name;
-}
-
-} // namespace robot_sdk
+}  // namespace robot_sdk

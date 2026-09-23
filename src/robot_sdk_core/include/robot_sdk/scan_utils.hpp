@@ -18,9 +18,10 @@ namespace robot_sdk {
 ///
 /// 注意这是个**纯函数**：不碰节点、不碰时间、不碰全局状态，
 /// 只吃一个消息结构体。所以它能被完全单元测试（成本接近零）。
-inline double nearestObstacleDistance(const sensor_msgs::msg::LaserScan& scan,
-                                      double angle_min = -std::numeric_limits<double>::infinity(),
-                                      double angle_max = std::numeric_limits<double>::infinity()) {
+inline double nearestObstacleDistance(
+    const sensor_msgs::msg::LaserScan &scan,
+    double angle_min = -std::numeric_limits<double>::infinity(),
+    double angle_max = std::numeric_limits<double>::infinity()) {
   double nearest = std::numeric_limits<double>::infinity();
   for (std::size_t i = 0; i < scan.ranges.size(); ++i) {
     const double range = scan.ranges[i];
@@ -29,11 +30,13 @@ inline double nearestObstacleDistance(const sensor_msgs::msg::LaserScan& scan,
     //   NaN  —— 读数无效（驱动/硬件错误）
     //   < range_min —— 落在传感器盲区内，读数不可信
     //   > range_max —— 有些驱动用 range_max（而非 inf）表示"无回波"
-    if (!std::isfinite(range) || range < scan.range_min || range > scan.range_max) {
+    if (!std::isfinite(range) || range < scan.range_min ||
+        range > scan.range_max) {
       continue;
     }
     // 角度不在消息里，要从起点 + 步长算出来。
-    const double angle = scan.angle_min + static_cast<double>(i) * scan.angle_increment;
+    const double angle =
+        scan.angle_min + static_cast<double>(i) * scan.angle_increment;
     if (angle < angle_min || angle > angle_max) {
       continue;
     }
@@ -42,4 +45,4 @@ inline double nearestObstacleDistance(const sensor_msgs::msg::LaserScan& scan,
   return nearest;
 }
 
-}  // namespace robot_sdk
+} // namespace robot_sdk

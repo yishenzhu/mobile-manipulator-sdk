@@ -28,6 +28,7 @@ add_library(robot_sdk_core SHARED
     src/config.cpp
     src/runtime.cpp
     src/transform.cpp
+    src/perception_api.cpp
 )
 target_compile_features(robot_sdk_core PUBLIC cxx_std_17)
 # PUBLIC = 编译这个库自己要用 + 下游使用者也要用

@@ -3,8 +3,10 @@
 #include <chrono>
 #include <memory>
 #include <thread>
+#include <utility>
 
 #include <geometry_msgs/msg/transform_stamped.hpp>
+#include <rclcpp/executors/single_threaded_executor.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <tf2_ros/static_transform_broadcaster.h>
 
@@ -15,6 +17,36 @@ using namespace robot_sdk;
 using namespace std::chrono_literals;
 
 namespace {
+
+/// 在后台 spin 一个节点，析构时保证把线程收干净。
+///
+/// 为什么需要它：`TransformManager` 用 spin_thread = false，/tf 订阅挂在**节点**上，
+/// 必须有人 spin 节点才能收到消息 —— 生产环境里那是 `RobotRuntime` 的
+/// MultiThreadedExecutor 干的，测试里得自己模拟。
+///
+/// 为什么用 RAII 而不是"最后手动 cancel+join"：gtest 的 ASSERT_* 会直接
+/// return 出测试体，手动清理会被跳过，留下一个没 join 的线程 → 进程退出时卡住。
+/// 让析构负责，就没有"忘记清理"这条路径。
+class NodeSpinner {
+ public:
+  explicit NodeSpinner(rclcpp::Node::SharedPtr node) : node_(std::move(node)) {
+    executor_.add_node(node_);
+    thread_ = std::thread([this] { executor_.spin(); });
+  }
+  ~NodeSpinner() {
+    executor_.cancel();
+    if (thread_.joinable()) {
+      thread_.join();
+    }
+  }
+  NodeSpinner(const NodeSpinner&) = delete;
+  NodeSpinner& operator=(const NodeSpinner&) = delete;
+
+ private:
+  rclcpp::Node::SharedPtr node_;
+  rclcpp::executors::SingleThreadedExecutor executor_;
+  std::thread thread_;
+};
 
 class TransformTest : public ::testing::Test {
  protected:
@@ -70,6 +102,10 @@ TEST_F(TransformTest, MissingFrameBecomesUnavailableError) {
 /// 这是"查不到"之外的另一半 —— 光测失败路径不算覆盖。
 TEST_F(TransformTest, LookupSucceedsWithPublishedStaticTransform) {
   auto node = std::make_shared<rclcpp::Node>("tf_static_test");
+  // 先把节点的执行器起起来，/tf 订阅才有线程去收。
+  NodeSpinner spinner(node);
+
+  TransformManager tf(node);
   auto broadcaster = std::make_shared<tf2_ros::StaticTransformBroadcaster>(node);
 
   geometry_msgs::msg::TransformStamped t;
@@ -80,20 +116,20 @@ TEST_F(TransformTest, LookupSucceedsWithPublishedStaticTransform) {
   t.transform.translation.y = 4.0;
   t.transform.translation.z = 0.0;
   t.transform.rotation.w = 1.0;
-  broadcaster->sendTransform(t);
 
-  TransformManager tf(node);
-
-  // 静态变换是 latched 的，但 listener 线程收到它仍需要一点时间 ——
-  // 轮询等待，最多 2 秒。避免用固定 sleep（那才是测试不稳定的根源）。
+  // 轮询 + **重发**，最多约 10 秒。
+  //
+  // 为什么要重发：发布者与订阅者之间要经过 DDS 发现，这个延迟不受我们控制。
+  // 只发一次、然后死等，就会在发现慢的时候偶发失败（这类"跑一百次挂一次"的
+  // 测试最消耗信任）。反复发 + 轮询把发现延迟变成"多等几轮"，而不是失败。
+  // 正常情况第一轮就成功，所以通过时几乎不花时间。
   bool ready = false;
-  for (int i = 0; i < 100 && !ready; ++i) {
+  for (int i = 0; i < 50 && !ready; ++i) {
+    broadcaster->sendTransform(t);
+    std::this_thread::sleep_for(200ms);
     ready = tf.canTransform("tf_test_parent", "tf_test_child");
-    if (!ready) {
-      std::this_thread::sleep_for(20ms);
-    }
   }
-  ASSERT_TRUE(ready) << "静态变换在 2 秒内未到达 TF buffer";
+  ASSERT_TRUE(ready) << "静态变换在约 10 秒内未到达 TF buffer";
 
   const auto pose = tf.currentPose("tf_test_parent", "tf_test_child", 1s);
   ASSERT_TRUE(pose.ok()) << pose.error().toString();

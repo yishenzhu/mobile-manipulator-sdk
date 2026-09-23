@@ -65,6 +65,12 @@ struct StatusConfig {
 
 struct RobotConfig {
   std::string node_name{"robot_sdk"};
+  /// 建节点时使用的命名空间（"robot1" 或 "/robot1" 都行）。
+  ///
+  /// 注意：它**只**影响节点的命名空间，不参与话题名拼接。
+  /// 相对话题名（"scan"）由 rcl 按节点命名空间自动展开成 "/robot1/scan" ——
+  /// 这是 ROS 2 的内建机制，SDK 不去重复实现它。
+  /// 寄生模式（客户提供节点）下本字段被忽略，命名空间由客户的节点决定。
   std::string robot_namespace{};
   bool use_sim_time{false};
 
@@ -77,10 +83,6 @@ struct RobotConfig {
   /// 参数名镜像结构体路径，例如 `navigation.global_frame`。
   /// 这样配置就能被 launch 文件覆盖，不用改代码重编。
   static RobotConfig fromNode(rclcpp::Node& node);
-
-  /// 把相对话题/动作/服务名解析到 robot_namespace 之下。
-  /// 绝对名（以 '/' 开头）原样返回。
-  std::string resolve(const std::string& relative_name) const;
 };
 
 }  // namespace robot_sdk

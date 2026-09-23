@@ -4,7 +4,9 @@
 #include <string>
 #include <vector>
 
+#include <rclcpp/qos.hpp>
 #include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/msg/laser_scan.hpp>
 
 #include "robot_sdk/config.hpp"
 
@@ -29,40 +31,6 @@ TEST(ConfigTest, NestedStructsAreDefaultConstructed) {
   EXPECT_TRUE(cfg.robot_namespace.empty());       // 空 string
   EXPECT_FALSE(cfg.use_sim_time);
   EXPECT_EQ(cfg.motion.gripper_closed_position, 0.0);
-}
-
-TEST(ConfigTest, ResolveLeavesRelativeNamesWhenNoNamespace) {
-  const RobotConfig cfg;
-  EXPECT_EQ(cfg.resolve("scan"), "scan");
-}
-
-TEST(ConfigTest, ResolvePrependsNormalizedNamespace) {
-  RobotConfig cfg;
-  cfg.robot_namespace = "robot1";
-  EXPECT_EQ(cfg.resolve("scan"), "/robot1/scan");
-
-  cfg.robot_namespace = "/robot1";   // 已带前导斜杠
-  EXPECT_EQ(cfg.resolve("scan"), "/robot1/scan");
-
-  cfg.robot_namespace = "/robot1/";  // 带尾部斜杠 —— 不能变成 "/robot1//scan"
-  EXPECT_EQ(cfg.resolve("scan"), "/robot1/scan");
-}
-
-TEST(ConfigTest, ResolveKeepsAbsoluteNamesAndEmpty) {
-  RobotConfig cfg;
-  cfg.robot_namespace = "robot1";
-  EXPECT_EQ(cfg.resolve("/global/topic"), "/global/topic");  // 绝对名不受命名空间影响
-  EXPECT_EQ(cfg.resolve(""), "");                            // 空名还是空名
-}
-
-TEST(ConfigTest, ResolveHandlesRootNamespaceWithoutDoubleSlash) {
-  RobotConfig cfg;
-  // 这些命名空间都表示"根"。削空后必须得到 "/scan"，
-  // 绝不能是 "//scan" —— 后者在 ROS 2 里是非法名，会抛异常。
-  for (const std::string ns : {"/", "//", "///"}) {
-    cfg.robot_namespace = ns;
-    EXPECT_EQ(cfg.resolve("scan"), "/scan") << "namespace = " << ns;
-  }
 }
 
 TEST(ConfigTest, NormalizeNamespaceProducesCanonicalForm) {
@@ -139,8 +107,6 @@ TEST_F(ConfigNodeTest, ReadsEveryParameterGroup) {
   EXPECT_EQ(cfg.perception.queue_depth, 3);
   EXPECT_EQ(cfg.status.status_topic, "health");
   EXPECT_EQ(cfg.robot_namespace, "robot1");
-  // 命名空间与参数解析是联动的：相对名 + 命名空间 = 绝对名
-  EXPECT_EQ(cfg.resolve(cfg.perception.laser_scan_topic), "/robot1/front/scan");
   // 没覆盖的组保持默认
   EXPECT_EQ(cfg.status.get_status_service, "get_robot_status");
   EXPECT_EQ(cfg.perception.imu_topic, "imu");
@@ -170,4 +136,31 @@ TEST_F(ConfigNodeTest, RawTrailingSlashNamespaceThrows) {
   EXPECT_THROW(std::make_shared<rclcpp::Node>("ns_bad_trailing", "/robot1/", options),
                std::exception);
   EXPECT_THROW(std::make_shared<rclcpp::Node>("ns_bad_double", "//", options), std::exception);
+}
+
+/// 这条测试守住的是 SDK 的**前提**。
+///
+/// SDK 现在把相对话题名（"scan"）直接交给 rcl，依赖它按节点命名空间
+/// 自动展开 —— 自己不再拼前缀。所以必须把 rcl 的这个行为钉住：
+/// 它一旦变了，SDK 的行为会**静默**改变。
+///
+/// 这也解释了为什么"想要不同命名空间"的正确做法是**建一个该命名空间的节点**，
+/// 而不是逐个名字去覆盖前缀。
+TEST_F(ConfigNodeTest, RelativeTopicNamesExpandUsingNodeNamespace) {
+  rclcpp::NodeOptions options;
+  auto node = std::make_shared<rclcpp::Node>("topic_ns_probe", "/robot1", options);
+
+  auto sub = node->create_subscription<sensor_msgs::msg::LaserScan>(
+      "scan", rclcpp::SensorDataQoS(), [](sensor_msgs::msg::LaserScan::ConstSharedPtr) {});
+  EXPECT_EQ(std::string(sub->get_topic_name()), "/robot1/scan");
+
+  // 多级相对名同样跟随命名空间
+  auto nested = node->create_subscription<sensor_msgs::msg::LaserScan>(
+      "camera/depth", rclcpp::SensorDataQoS(), [](sensor_msgs::msg::LaserScan::ConstSharedPtr) {});
+  EXPECT_EQ(std::string(nested->get_topic_name()), "/robot1/camera/depth");
+
+  // 绝对名不受节点命名空间影响
+  auto absolute = node->create_subscription<sensor_msgs::msg::LaserScan>(
+      "/global/scan", rclcpp::SensorDataQoS(), [](sensor_msgs::msg::LaserScan::ConstSharedPtr) {});
+  EXPECT_EQ(std::string(absolute->get_topic_name()), "/global/scan");
 }
