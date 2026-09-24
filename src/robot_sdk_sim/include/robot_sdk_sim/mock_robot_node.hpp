@@ -12,6 +12,7 @@
 #include <tf2_ros/static_transform_broadcaster.h>
 #include <tf2_ros/transform_broadcaster.h>
 
+#include <robot_sdk_interfaces/action/move_to_joint_positions.hpp>
 #include <robot_sdk_interfaces/action/navigate_to_pose.hpp>
 #include <robot_sdk_interfaces/msg/robot_status.hpp>
 #include <robot_sdk_interfaces/srv/get_robot_status.hpp>
@@ -37,6 +38,8 @@ class MockRobotNode : public rclcpp::Node {
   using RobotStatus = robot_sdk_interfaces::msg::RobotStatus;
   using NavigateToPose = robot_sdk_interfaces::action::NavigateToPose;
   using GoalHandleNavigate = rclcpp_action::ServerGoalHandle<NavigateToPose>;
+  using MoveToJointPositions = robot_sdk_interfaces::action::MoveToJointPositions;
+  using GoalHandleMove = rclcpp_action::ServerGoalHandle<MoveToJointPositions>;
 
   void controlTick();
   void statusTick();
@@ -55,6 +58,17 @@ class MockRobotNode : public rclcpp::Node {
 
   /// 组装一条导航反馈。参数 `lock` 是凭证（同 `makeStatus`）。
   NavigateToPose::Feedback makeNavFeedback(std::lock_guard<std::mutex>& lock) const;
+
+  /// 推进关节运动 —— 同样跑在 50 Hz 控制回路上，结构同 `navTick`（笔记 §7.8）。
+  void motionTick();
+
+  /// 关节运动服务端的三个回调。与导航**共用** `action_group_`（同一条可重入车道）。
+  rclcpp_action::GoalResponse handleMotionGoal(
+      const rclcpp_action::GoalUUID& uuid,
+      std::shared_ptr<const MoveToJointPositions::Goal> goal);
+  rclcpp_action::CancelResponse handleMotionCancel(
+      const std::shared_ptr<GoalHandleMove> goal_handle);
+  void handleMotionAccepted(const std::shared_ptr<GoalHandleMove> goal_handle);
 
   void publishFrames();
   void publishJoints();
@@ -94,6 +108,7 @@ class MockRobotNode : public rclcpp::Node {
 
   rclcpp::Service<GetRobotStatus>::SharedPtr status_service_;
   rclcpp_action::Server<NavigateToPose>::SharedPtr nav_server_;
+  rclcpp_action::Server<MoveToJointPositions>::SharedPtr motion_server_;
 
   /// 保护下面这些"机器人状态"成员：控制定时器写、状态/反馈读。
   std::mutex mutex_;
@@ -108,6 +123,14 @@ class MockRobotNode : public rclcpp::Node {
   bool nav_cancel_requested_{false};
   /// 反馈降频用：每 N 个控制周期发一条反馈。
   int feedback_divider_{0};
+
+  // ── 关节运动状态（同样受 mutex_ 保护）──
+  std::shared_ptr<GoalHandleMove> motion_goal_handle_;
+  /// 目标位置，与 `joint_positions_` **同序同长**；目标没点名的关节填当前值。
+  std::vector<double> motion_target_;
+  double motion_max_velocity_{0.0};
+  bool motion_active_{false};
+  bool motion_cancel_requested_{false};
   std::vector<std::string> joint_names_;
   std::vector<double> joint_positions_;
   double battery_{100.0};

@@ -30,6 +30,10 @@ constexpr int kFeedbackEveryNTicks = 5;
 // 客户没给 max_speed（或给了 <= 0）时用的默认速度。
 constexpr double kDefaultMaxSpeedMps = 0.5;
 
+// 关节运动的到位容差（弧度 / 米），以及客户没给 max_velocity 时的默认值。
+constexpr double kJointTolerance = 0.01;
+constexpr double kDefaultJointVelocity = 0.5;
+
 /// 造一个 TF 消息。`parent -> child`，带平移和偏航。
 geometry_msgs::msg::TransformStamped makeTransform(const rclcpp::Time &stamp,
                                                    const std::string &parent,
@@ -124,6 +128,21 @@ MockRobotNode::MockRobotNode(const rclcpp::NodeOptions &options)
       },
       rcl_action_server_get_default_options(), action_group_);
 
+  // 关节运动服务端：与导航**共用** action_group_（同一条可重入车道）。
+  motion_server_ = rclcpp_action::create_server<MoveToJointPositions>(
+      this, config_.motion.action_name,
+      [this](const rclcpp_action::GoalUUID &uuid,
+             std::shared_ptr<const MoveToJointPositions::Goal> goal) {
+        return handleMotionGoal(uuid, std::move(goal));
+      },
+      [this](const std::shared_ptr<GoalHandleMove> handle) {
+        return handleMotionCancel(handle);
+      },
+      [this](const std::shared_ptr<GoalHandleMove> handle) {
+        handleMotionAccepted(handle);
+      },
+      rcl_action_server_get_default_options(), action_group_);
+
   control_timer_ = create_wall_timer(
       std::chrono::duration<double>(kControlPeriodS),
       [this]() { controlTick(); }, timer_group_);
@@ -157,6 +176,8 @@ MockRobotNode::makeStatus(std::lock_guard<std::mutex> & /*lock*/) const {
   status.header.frame_id = config_.navigation.base_frame;
   if (nav_active_) {
     status.state = RobotStatus::STATE_NAVIGATING;
+  } else if (motion_active_) {
+    status.state = RobotStatus::STATE_MOVING;
   } else if (charging_) {
     status.state = RobotStatus::STATE_CHARGING;
   } else {
@@ -325,8 +346,133 @@ MockRobotNode::makeNavFeedback(std::lock_guard<std::mutex> & /*lock*/) const {
   return feedback;
 }
 
+void MockRobotNode::motionTick() {
+  std::shared_ptr<GoalHandleMove> handle;
+  MoveToJointPositions::Result::SharedPtr result;
+  bool done = false;
+  bool canceled = false;
+
+  {
+    // ── 锁内：推进数据 + 判定终态（不碰框架）──
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!motion_active_) {
+      return;
+    }
+    handle = motion_goal_handle_;
+
+    if (motion_cancel_requested_) {
+      motion_active_ = false;
+      motion_cancel_requested_ = false;
+      done = true;
+      canceled = true;
+      result = std::make_shared<MoveToJointPositions::Result>();
+      result->message = "canceled by client";
+    } else {
+      // 每个关节各自朝目标走一步。`|误差| <= 本拍行程` 时直接对齐 ——
+      // 既避免过冲，也让"误差恰好为 0"不会把关节推离目标。
+      const double step = motion_max_velocity_ * kControlPeriodS;
+      double worst = 0.0;
+      for (std::size_t i = 0; i < joint_positions_.size(); ++i) {
+        const double error = motion_target_[i] - joint_positions_[i];
+        if (std::abs(error) <= step) {
+          joint_positions_[i] = motion_target_[i];
+        } else {
+          joint_positions_[i] += std::copysign(step, error);
+        }
+        worst = std::max(worst, std::abs(motion_target_[i] - joint_positions_[i]));
+      }
+
+      if (worst <= kJointTolerance) {
+        joint_positions_ = motion_target_; // 对齐，免得留下残差
+        motion_active_ = false;
+        done = true;
+        result = std::make_shared<MoveToJointPositions::Result>();
+        result->success = true;
+        result->final_position_error = static_cast<float>(worst);
+        result->message = "reached target";
+      }
+    }
+  } // ← 锁在这里放掉：下面全是框架调用
+
+  if (done) {
+    if (canceled) {
+      handle->canceled(result);
+    } else {
+      handle->succeed(result);
+    }
+  }
+}
+
+rclcpp_action::GoalResponse MockRobotNode::handleMotionGoal(
+    const rclcpp_action::GoalUUID & /*uuid*/,
+    std::shared_ptr<const MoveToJointPositions::Goal> goal) {
+  // 关节名与位置必须一一对应 —— 否则根本不知道该动哪个关节。
+  if (goal->target.name.empty() ||
+      goal->target.name.size() != goal->target.position.size()) {
+    RCLCPP_WARN(get_logger(), "拒绝运动目标：关节名与位置数量不匹配");
+    return rclcpp_action::GoalResponse::REJECT;
+  }
+
+  bool busy = false;
+  bool unknown = false;
+  {
+    // 锁内只碰数据：先在**局部**把目标拼好，全部合法才提交（不留半成品状态）。
+    std::lock_guard<std::mutex> lock(mutex_);
+    busy = motion_active_;
+    if (!busy) {
+      std::vector<double> target = joint_positions_; // 目标没点名的关节保持原位
+      for (std::size_t k = 0; k < goal->target.name.size(); ++k) {
+        const auto it =
+            std::find(joint_names_.begin(), joint_names_.end(), goal->target.name[k]);
+        if (it == joint_names_.end()) {
+          unknown = true;
+          break;
+        }
+        target[static_cast<std::size_t>(it - joint_names_.begin())] =
+            goal->target.position[k];
+      }
+      if (!unknown) {
+        motion_target_ = std::move(target);
+        motion_max_velocity_ =
+            goal->max_velocity > 0.0f ? goal->max_velocity : kDefaultJointVelocity;
+        motion_active_ = true; // 占位：防止并发到达的第二个目标也被接受
+        // 残留的取消请求不能影响新目标（同 handleNavGoal，见 学习笔记.md §7.8）。
+        motion_cancel_requested_ = false;
+      }
+    }
+  }
+
+  if (busy) {
+    RCLCPP_WARN(get_logger(), "拒绝运动目标：已经在运动");
+    return rclcpp_action::GoalResponse::REJECT;
+  }
+  if (unknown) {
+    RCLCPP_WARN(get_logger(), "拒绝运动目标：包含本机没有的关节");
+    return rclcpp_action::GoalResponse::REJECT;
+  }
+  return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
+}
+
+rclcpp_action::CancelResponse MockRobotNode::handleMotionCancel(
+    const std::shared_ptr<GoalHandleMove> goal_handle) {
+  // 同 handleNavCancel：只拨 flag，真正的"停下 + 回 canceled()"交给控制回路。
+  if (!goal_handle->is_active()) {
+    return rclcpp_action::CancelResponse::REJECT;
+  }
+  std::lock_guard<std::mutex> lock(mutex_);
+  motion_cancel_requested_ = true;
+  return rclcpp_action::CancelResponse::ACCEPT;
+}
+
+void MockRobotNode::handleMotionAccepted(
+    const std::shared_ptr<GoalHandleMove> goal_handle) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  motion_goal_handle_ = goal_handle;
+}
+
 void MockRobotNode::controlTick() {
-  navTick(); // 先推进导航，再发布"机器人现在长什么样"
+  navTick();    // 先推进导航，
+  motionTick(); // 再推进关节运动，
   publishJoints();
   publishFrames();
 }
