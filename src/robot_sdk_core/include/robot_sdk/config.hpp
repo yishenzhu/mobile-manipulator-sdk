@@ -44,6 +44,9 @@ struct MotionConfig {
   std::string gripper_joint{"gripper_joint"};
   double gripper_open_position{0.04};
   double gripper_closed_position{0.0};
+  /// 夹爪动作的超时。夹爪行程短、动作快，所以**独立于 default_timeout_s** ——
+  /// 用通用的 30 秒去等一个夹爪动作，卡住时要干等半分钟。
+  double gripper_timeout_s{5.0};
 };
 
 struct PerceptionConfig {

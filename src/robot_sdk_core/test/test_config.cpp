@@ -31,6 +31,7 @@ TEST(ConfigTest, NestedStructsAreDefaultConstructed) {
   EXPECT_TRUE(cfg.robot_namespace.empty());       // 空 string
   EXPECT_FALSE(cfg.use_sim_time);
   EXPECT_EQ(cfg.motion.gripper_closed_position, 0.0);
+  EXPECT_DOUBLE_EQ(cfg.motion.gripper_timeout_s, 5.0);  // 独立于 default_timeout_s
 }
 
 TEST(ConfigTest, NormalizeNamespaceProducesCanonicalForm) {
@@ -91,6 +92,7 @@ TEST_F(ConfigNodeTest, ReadsEveryParameterGroup) {
       // 字符串数组参数 —— 和标量是不同的代码路径
       rclcpp::Parameter("motion.joint_names", std::vector<std::string>{"joint_a", "joint_b"}),
       rclcpp::Parameter("motion.gripper_open_position", 0.08),
+      rclcpp::Parameter("motion.gripper_timeout_s", 1.5),
       rclcpp::Parameter("perception.laser_scan_topic", "front/scan"),
       rclcpp::Parameter("perception.queue_depth", 3),
       rclcpp::Parameter("status.status_topic", "health"),
@@ -103,6 +105,7 @@ TEST_F(ConfigNodeTest, ReadsEveryParameterGroup) {
   EXPECT_EQ(cfg.motion.joint_names[0], "joint_a");
   EXPECT_EQ(cfg.motion.joint_names[1], "joint_b");
   EXPECT_DOUBLE_EQ(cfg.motion.gripper_open_position, 0.08);
+  EXPECT_DOUBLE_EQ(cfg.motion.gripper_timeout_s, 1.5);
   EXPECT_EQ(cfg.perception.laser_scan_topic, "front/scan");
   EXPECT_EQ(cfg.perception.queue_depth, 3);
   EXPECT_EQ(cfg.status.status_topic, "health");

@@ -71,6 +71,8 @@ RobotConfig RobotConfig::fromNode(rclcpp::Node &node) {
       node, "motion.gripper_open_position", cfg.motion.gripper_open_position);
   cfg.motion.gripper_closed_position = declareAndGet<double>(
       node, "motion.gripper_closed_position", cfg.motion.gripper_closed_position);
+  cfg.motion.gripper_timeout_s = declareAndGet<double>(
+      node, "motion.gripper_timeout_s", cfg.motion.gripper_timeout_s);
   // 注意：motion.named_targets 故意不在这里读。
   // 它是 map<string, vector<double>>，而 ROS 2 的参数类型只有
   // bool / int64 / double / string 以及它们的数组 —— 没有 map 类型，
