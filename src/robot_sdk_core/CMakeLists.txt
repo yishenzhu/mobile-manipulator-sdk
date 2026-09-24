@@ -34,6 +34,7 @@ add_library(robot_sdk_core SHARED
     src/status_api.cpp
     src/navigation_api.cpp
     src/motion_api.cpp
+    src/robot.cpp
 )
 target_compile_features(robot_sdk_core PUBLIC cxx_std_17)
 # PUBLIC = 编译这个库自己要用 + 下游使用者也要用
@@ -87,6 +88,9 @@ if(BUILD_TESTING)
     target_link_libraries(test_navigation_api robot_sdk_core)
     ament_add_gtest(test_motion_api test/test_motion_api.cpp)
     target_link_libraries(test_motion_api robot_sdk_core)
+    # 这条顺带充当 robot_sdk.hpp（umbrella）的自包含性测试
+    ament_add_gtest(test_robot test/test_robot.cpp)
+    target_link_libraries(test_robot robot_sdk_core)
 endif()
 
 ament_package()

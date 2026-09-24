@@ -24,6 +24,9 @@ std::string normalizeNamespace(const std::string& ns);
 /// 这样就能被 launch 文件覆盖而不用改代码。
 
 struct NavigationConfig {
+  /// 后端 action 名（相对名，由 rcl 按节点命名空间展开）。
+  /// ⚠️ 必须与 `MotionConfig::action_name` **不同** —— 两者是不同类型的 action，
+  ///    同名会让底层 send_goal 服务话题类型撞车，rcl 拒绝创建。见 学习笔记.md 第 1 节。
   std::string action_name{"navigate_to_pose"};
   std::string global_frame{"map"};
   // 用地面投影帧而不是 base_link：Pose2D 是平面量，语义上就该来自
@@ -36,6 +39,7 @@ struct NavigationConfig {
 };
 
 struct MotionConfig {
+  /// 后端 action 名。⚠️ 必须与 `NavigationConfig::action_name` **不同**（同上）。
   std::string action_name{"move_to_joint_positions"};
   std::vector<std::string> joint_names{};
   double default_timeout_s{30.0};

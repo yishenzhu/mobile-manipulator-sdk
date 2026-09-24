@@ -6,7 +6,7 @@
 
 #include <rclcpp/qos.hpp>
 
-#include "robot_sdk/scan_utils.hpp"
+#include "robot_sdk/detail/scan_utils.hpp"
 
 namespace robot_sdk {
 namespace {

@@ -6,7 +6,7 @@
 #include <utility>
 #include <vector>
 
-#include "robot_sdk/action_util.hpp"
+#include "robot_sdk/detail/action_util.hpp"
 
 namespace robot_sdk {
 

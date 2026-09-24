@@ -5,7 +5,7 @@
 
 #include <sensor_msgs/msg/laser_scan.hpp>
 
-#include "robot_sdk/scan_utils.hpp"
+#include "robot_sdk/detail/scan_utils.hpp"
 
 using namespace robot_sdk;
 

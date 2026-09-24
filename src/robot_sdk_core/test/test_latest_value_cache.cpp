@@ -3,7 +3,7 @@
 #include <chrono>
 #include <thread>
 
-#include "robot_sdk/latest_value_cache.hpp"
+#include "robot_sdk/detail/latest_value_cache.hpp"
 
 using namespace robot_sdk;
 using namespace std::chrono_literals;

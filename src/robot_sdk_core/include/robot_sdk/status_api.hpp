@@ -13,7 +13,7 @@
 #include <sensor_msgs/msg/joint_state.hpp>
 
 #include "robot_sdk/config.hpp"
-#include "robot_sdk/latest_value_cache.hpp"
+#include "robot_sdk/detail/latest_value_cache.hpp"
 #include "robot_sdk/result.hpp"
 
 namespace robot_sdk {
