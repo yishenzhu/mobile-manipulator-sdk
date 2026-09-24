@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<package format="3">
+    <name>robot_sdk_sim</name>
+    <version>0.1.0</version>
+    <description>
+    实现 Robot SDK 接口的模拟移动操作机器人。
+    有了它，示例、集成测试和新手上手都不需要 Gazebo 或真机。
+    </description>
+    <maintainer email="3464428214@qq.com">Robot SDK</maintainer>
+    <license>Apache-2.0</license>
+
+    <buildtool_depend>ament_cmake</buildtool_depend>
+
+    <depend>rclcpp</depend>
+    <depend>geometry_msgs</depend>
+    <depend>sensor_msgs</depend>
+    <depend>tf2_ros</depend>
+    <depend>robot_sdk_interfaces</depend>
+    <depend>robot_sdk_core</depend>
+
+    <export>
+        <build_type>ament_cmake</build_type>
+    </export>
+</package>
