@@ -32,8 +32,14 @@ struct NavigationGoal {
   double max_speed{0.0};
 
   /// 是否避障。
-  /// ⚠️ 当前随 SDK 提供的两个后端（mock / Nav2 适配器）**都还没读它** ——
-  /// 见 学习笔记.md 的「声明了但没兑现」清单。别以为传 false 就真的不避障。
+  ///
+  /// ⚠️ **透传但不兑现**：SDK 会把它原样放进 action 目标（所以不会静默丢失），
+  /// 但**目前没有任何后端实现避障** ——
+  ///   - mock：读到了，但只在 `true` 时打一次 WARN，行为上照样直冲；
+  ///   - Nav2 适配器：尚未提供（第 6 阶段）。
+  ///
+  /// 因此 **传 `true` 不等于真的会绕开障碍物；传 `false` 也不等于"关掉了避障"
+  /// —— 压根没有避障可关。** 见 学习笔记.md 的「声明了但没兑现」清单。
   bool avoid_obstacles{true};
 
   /// 超时秒数。**<= 0 = 用 `NavigationConfig::default_timeout_s`**。

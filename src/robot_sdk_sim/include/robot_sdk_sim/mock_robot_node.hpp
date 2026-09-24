@@ -7,10 +7,12 @@
 #include <vector>
 
 #include <rclcpp/rclcpp.hpp>
+#include <rclcpp_action/rclcpp_action.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
 #include <tf2_ros/static_transform_broadcaster.h>
 #include <tf2_ros/transform_broadcaster.h>
 
+#include <robot_sdk_interfaces/action/navigate_to_pose.hpp>
 #include <robot_sdk_interfaces/msg/robot_status.hpp>
 #include <robot_sdk_interfaces/srv/get_robot_status.hpp>
 
@@ -33,9 +35,26 @@ class MockRobotNode : public rclcpp::Node {
  private:
   using GetRobotStatus = robot_sdk_interfaces::srv::GetRobotStatus;
   using RobotStatus = robot_sdk_interfaces::msg::RobotStatus;
+  using NavigateToPose = robot_sdk_interfaces::action::NavigateToPose;
+  using GoalHandleNavigate = rclcpp_action::ServerGoalHandle<NavigateToPose>;
 
   void controlTick();
   void statusTick();
+
+  /// 推进导航 —— 跑在 50 Hz 控制回路上。
+  /// 锁内只碰数据；`publish_feedback` / `succeed` / `canceled` 全在锁外调用（笔记 §7.8）。
+  void navTick();
+
+  /// 导航动作服务端的三个回调。它们跑在**独立的可重入组**里，
+  /// 与 50 Hz 控制回路真的并发 —— 这正是 `mutex_` 存在的理由。
+  rclcpp_action::GoalResponse handleNavGoal(const rclcpp_action::GoalUUID& uuid,
+                                            std::shared_ptr<const NavigateToPose::Goal> goal);
+  rclcpp_action::CancelResponse handleNavCancel(
+      const std::shared_ptr<GoalHandleNavigate> goal_handle);
+  void handleNavAccepted(const std::shared_ptr<GoalHandleNavigate> goal_handle);
+
+  /// 组装一条导航反馈。参数 `lock` 是凭证（同 `makeStatus`）。
+  NavigateToPose::Feedback makeNavFeedback(std::lock_guard<std::mutex>& lock) const;
 
   void publishFrames();
   void publishJoints();
@@ -60,6 +79,9 @@ class MockRobotNode : public rclcpp::Node {
   RobotConfig config_;
 
   rclcpp::CallbackGroup::SharedPtr timer_group_;
+  /// 导航动作服务端的组。**故意与 `timer_group_` 相反（可重入）**：
+  /// 目标/取消可以在控制回路跑着的时候到达 —— 两条车道真的并发。
+  rclcpp::CallbackGroup::SharedPtr action_group_;
 
   rclcpp::Publisher<RobotStatus>::SharedPtr status_pub_;
   rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr joint_pub_;
@@ -71,10 +93,21 @@ class MockRobotNode : public rclcpp::Node {
   rclcpp::TimerBase::SharedPtr status_timer_;
 
   rclcpp::Service<GetRobotStatus>::SharedPtr status_service_;
+  rclcpp_action::Server<NavigateToPose>::SharedPtr nav_server_;
 
   /// 保护下面这些"机器人状态"成员：控制定时器写、状态/反馈读。
   std::mutex mutex_;
   Pose2D pose_{};
+
+  // ── 导航状态（同样受 mutex_ 保护）──
+  std::shared_ptr<GoalHandleNavigate> nav_goal_handle_;
+  Pose2D nav_target_{};
+  double nav_max_speed_{0.0};
+  bool nav_active_{false};
+  /// 客户已经请求取消。由取消回调（框架线程）置位，控制回路消费。
+  bool nav_cancel_requested_{false};
+  /// 反馈降频用：每 N 个控制周期发一条反馈。
+  int feedback_divider_{0};
   std::vector<std::string> joint_names_;
   std::vector<double> joint_positions_;
   double battery_{100.0};
