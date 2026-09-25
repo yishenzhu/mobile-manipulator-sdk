@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <string>
 #include <utility>
 
@@ -33,6 +34,36 @@ constexpr double kDefaultMaxSpeedMps = 0.5;
 // 关节运动的到位容差（弧度 / 米），以及客户没给 max_velocity 时的默认值。
 constexpr double kJointTolerance = 0.01;
 constexpr double kDefaultJointVelocity = 0.5;
+
+// 传感器：控制回路 50 Hz → 传感器 10 Hz。
+constexpr int kSensorEveryNTicks = 5;
+// 激光：一圈 1° 分辨率，量程照常见 2D 雷达填。
+constexpr int kScanRays = 360;
+constexpr double kScanRangeMin = 0.05;
+constexpr double kScanRangeMax = 10.0;
+// 激光挂载点相对 base 的 x 偏移 —— **必须与构造函数里那条静态 TF 一致**。
+constexpr double kLaserOffsetX = 0.1;
+
+// 模拟机器人的"世界"：一个矩形房间，**四面墙就是它唯一的障碍物**。
+// 它没有障碍物模型（见 docs/mock-robot-node.md §1.3），所以扫描得在这里"编"出来。
+constexpr double kRoomHalfWidth = 5.0;  // x ∈ [-5, 5]
+constexpr double kRoomHalfHeight = 4.0; // y ∈ [-4, 4]
+
+/// 从 (px, py) 沿角度 a 射出的光线，打到矩形房间墙上的距离。
+///
+/// 分别求与 x = ±半宽、y = ±半高 四个面的交点，取最近的那个。
+double rayToWall(double px, double py, double a) {
+  const double dx = std::cos(a);
+  const double dy = std::sin(a);
+  // 平行于某个轴时（dx 或 dy 为 0）那个面永远打不到 —— 用 inf 表示。
+  const double tx = dx > 0.0 ? (kRoomHalfWidth - px) / dx
+                             : (dx < 0.0 ? (-kRoomHalfWidth - px) / dx
+                                         : std::numeric_limits<double>::infinity());
+  const double ty = dy > 0.0 ? (kRoomHalfHeight - py) / dy
+                             : (dy < 0.0 ? (-kRoomHalfHeight - py) / dy
+                                         : std::numeric_limits<double>::infinity());
+  return std::min(tx, ty);
+}
 
 /// 造一个 TF 消息。`parent -> child`，带平移和偏航。
 geometry_msgs::msg::TransformStamped makeTransform(const rclcpp::Time &stamp,
@@ -76,6 +107,15 @@ MockRobotNode::MockRobotNode(const rclcpp::NodeOptions &options)
   status_pub_ = create_publisher<RobotStatus>(config_.status.status_topic, 10);
   joint_pub_ = create_publisher<sensor_msgs::msg::JointState>(
       config_.status.joint_states_topic, 10);
+
+  // 传感器用与 SDK 侧 `PerceptionAPI` **完全相同的 QoS**：
+  // best_effort + keep_last(队列深度)。两边不一致的话订阅会**静默收不到**数据。
+  auto sensor_qos = rclcpp::SensorDataQoS();
+  sensor_qos.keep_last(static_cast<std::size_t>(config_.perception.queue_depth));
+  scan_pub_ = create_publisher<sensor_msgs::msg::LaserScan>(
+      config_.perception.laser_scan_topic, sensor_qos);
+  imu_pub_ = create_publisher<sensor_msgs::msg::Imu>(config_.perception.imu_topic,
+                                                     sensor_qos);
 
   tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
   static_tf_broadcaster_ =
@@ -443,10 +483,11 @@ void MockRobotNode::handleMotionAccepted(
 }
 
 void MockRobotNode::controlTick() {
-  navTick();    // 先推进导航，
-  motionTick(); // 再推进关节运动，
+  navTick();      // 先推进导航，
+  motionTick();   // 再推进关节运动，
   publishJoints();
   publishFrames();
+  publishSensors(); // 内部降频到 10 Hz —— 传感器不必跟 50 Hz 控制同频
 }
 
 void MockRobotNode::statusTick() {
@@ -502,6 +543,75 @@ void MockRobotNode::publishJoints() {
     msg.effort.assign(joint_names_.size(), 0.0);
   }
   joint_pub_->publish(msg);
+}
+
+void MockRobotNode::publishSensors() {
+  sensor_msgs::msg::LaserScan scan;
+  sensor_msgs::msg::Imu imu;
+
+  {
+    // ── 锁内：降频判断 + 取数 + 组装（不碰发布）──
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    // 降频判断其实**可以**放在锁外：`sensor_divider_` 只有控制回路这一条车道会碰
+    // （`controlTick` 全在 timer_group_ 的互斥组里，不会和自己并发），严格说不需要锁。
+    // 仍然放在锁内，是为了守住一条更简单的规则：
+    //   **`mutex_` 下面那一块成员，全部在锁内访问，没有例外。**
+    // 挪出去省下的是一次无争用的 lock/unlock（纳秒级，量不出来），
+    // 代价却是引入一个"这个成员其实不受保护"的例外 —— 以后有人在别的车道
+    // 顺手读它，就是**静默的数据竞争**。判据同 §4.5 / §6.3：不为量不到的收益加规则。
+    // （`last_yaw_` 是同一类。）
+    if (++sensor_divider_ < kSensorEveryNTicks) {
+      return; // 还没到下一拍
+    }
+    sensor_divider_ = 0;
+
+    const auto stamp = now();
+
+    // ── 激光：从挂载点朝一圈方向射线，打到房间的墙上 ──
+    scan.header.stamp = stamp;
+    scan.header.frame_id = laser_frame_;
+    scan.angle_min = -M_PI;
+    scan.angle_max = M_PI;
+    scan.angle_increment = 2.0 * M_PI / kScanRays;
+    scan.range_min = kScanRangeMin;
+    scan.range_max = kScanRangeMax;
+    scan.scan_time = static_cast<float>(kControlPeriodS * kSensorEveryNTicks);
+
+    // 挂载点：相对 base 的偏移，随机器人朝向一起转。
+    const double laser_x = pose_.x + kLaserOffsetX * std::cos(pose_.yaw);
+    const double laser_y = pose_.y + kLaserOffsetX * std::sin(pose_.yaw);
+
+    scan.ranges.reserve(kScanRays);
+    for (int i = 0; i < kScanRays; ++i) {
+      // angle 是**激光坐标系**里的角 —— 机器人转了，世界角就跟着转。
+      const double angle = scan.angle_min + i * scan.angle_increment;
+      const double range = rayToWall(laser_x, laser_y, pose_.yaw + angle);
+      // 超出量程 = 没有回波。ROS 约定用 inf，不是 0、也不是 range_max。
+      scan.ranges.push_back(range <= kScanRangeMax
+                                ? static_cast<float>(std::max(range, kScanRangeMin))
+                                : std::numeric_limits<float>::infinity());
+    }
+
+    // ── IMU：朝向取真值；角速度只能由上一拍的偏航差得到，没有别的来源 ──
+    imu.header.stamp = stamp;
+    imu.header.frame_id = imu_frame_;
+    imu.orientation = quaternionFromYaw(pose_.yaw);
+    imu.angular_velocity.z =
+        angleDifference(pose_.yaw, last_yaw_) / (kControlPeriodS * kSensorEveryNTicks);
+    last_yaw_ = pose_.yaw;
+    // 静止时加速度计读到的是**支持力**，所以 z 是 +g 而不是 -g。
+    imu.linear_acceleration.z = 9.81;
+    // 协方差给个小值，不给 0：0 在 ROS 里表示"完全已知"，
+    // 下游滤波器会当特例处理（有的直接拿它做除法）。本模拟器无噪声，
+    // 但也没必要**假装**完全已知。
+    imu.orientation_covariance[0] = 1e-4;
+    imu.angular_velocity_covariance[0] = 1e-4;
+    imu.linear_acceleration_covariance[0] = 1e-4;
+  } // ← 锁在这里放掉
+
+  scan_pub_->publish(scan); // 锁外做 I/O
+  imu_pub_->publish(imu);
 }
 
 } // namespace robot_sdk::sim

@@ -8,7 +8,9 @@
 
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
+#include <sensor_msgs/msg/imu.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
+#include <sensor_msgs/msg/laser_scan.hpp>
 #include <tf2_ros/static_transform_broadcaster.h>
 #include <tf2_ros/transform_broadcaster.h>
 
@@ -77,6 +79,10 @@ class MockRobotNode : public rclcpp::Node {
   void publishFrames();
   void publishJoints();
 
+  /// 发布板载传感器（激光 + IMU），内部降到 10 Hz。
+  /// 与状态、关节一样：**锁内取数、锁外发布**（本文档 §4.3 纪律 1）。
+  void publishSensors();
+
   /// 把"此刻的状态"拼成一条 RobotStatus。
   ///
   /// **状态话题与服务查询共用它** —— 否则同一个事实存两份，
@@ -106,6 +112,8 @@ class MockRobotNode : public rclcpp::Node {
 
   rclcpp::Publisher<RobotStatus>::SharedPtr status_pub_;
   rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr joint_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr scan_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr imu_pub_;
 
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
   std::unique_ptr<tf2_ros::StaticTransformBroadcaster> static_tf_broadcaster_;
@@ -140,6 +148,13 @@ class MockRobotNode : public rclcpp::Node {
   double battery_{100.0};
   bool charging_{false};
   double uptime_s_{0.0};
+
+  /// 传感器降频用：控制回路 50 Hz，传感器只要 10 Hz。
+  /// 它和 `last_yaw_` 其实只有控制回路这一条车道会碰（严格说不需要锁），
+  /// 但**故意**留在 `mutex_` 保护区内 —— 理由写在 `publishSensors()` 里。
+  int sensor_divider_{0};
+  /// 上一拍的偏航角 —— IMU 的角速度只能由差分得到，没有别的来源。
+  double last_yaw_{0.0};
 
   // 传感器挂载点（相对 base_frame 的静态变换里用得到）
   std::string laser_frame_{"laser_frame"};
