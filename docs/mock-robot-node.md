@@ -1,0 +1,764 @@
+# mock 机器人节点 —— 设计说明
+
+> **阅读顺序**：§1（它要做什么）→ **§3（业务流程：谁做什么）** → §4（并发模型）→ §5（动作服务端）。
+> 本文只讲**为什么这样写**；逐行 API 看代码本身；逐次踩坑的历史看 `ws/学习笔记.md`。
+
+## 0. 本文的结论分两类
+
+本项目最在意的一条纪律是：**不许把"推出来的结论"当成"量出来的事实"**。所以本文所有结论都标注来源：
+
+| 标记 | 含义 |
+|---|---|
+| **【量】** | 在本机跑过，有数字。命令与数据都在正文里 |
+| **【推】** | 从代码结构或框架语义推导，**没有实测** |
+
+看到 **【推】** 就说明"这条还没被验证，别当事实用"。这不是免责声明 —— 这个项目已经四次在"推出来的"地方翻车（见 `学习笔记.md` 的「一个反复出现的毛病（第三次了）」）。
+
+---
+
+## 1. 它要做什么
+
+**一句话：让 SDK 的客户代码不需要 Gazebo 或真机就能跑通。**
+
+### 1.1 边界：它只讲 **SDK 的契约**
+
+这是全篇最重要的一个约束。
+
+```
+      客户代码
+         │  只用 robot_sdk 的头文件
+         ▼
+   ┌─────────────┐
+   │ robot_sdk   │  ← 契约在这里定义
+   │  (core)     │     （话题名、服务名、action 名、消息类型、超时语义）
+   └─────────────┘
+         │  契约的两侧可以互换：
+         ▼
+   ┌─────────────┐        ┌──────────────┐
+   │ mock_robot  │  或者   │ Gazebo / 真机 │
+   │   (sim)     │        │  （第 6 阶段） │
+   └─────────────┘        └──────────────┘
+```
+
+- mock **只实现 SDK 已经承诺的东西**，不发明新接口。
+- 因此把 mock 换成 Gazebo 时，**客户代码一行不改**。
+- 反过来说：mock 里出现的任何"只有 mock 才有的概念"，都是设计错误。
+
+**推论：所有名字都从 `RobotConfig` 来，不硬编码。** mock 不去拼话题名 —— 它用**相对名**（`"robot_status"`），由 rcl 按节点命名空间自动展开成 `/robot1/robot_status`（见 §2.1）。
+
+### 1.2 需求 → 实现对照
+
+| 客户的需求 | 为什么需要（而不是别的形式） | 实现 | 频率 |
+|---|---|---|---|
+| "机器人现在怎么样？"（**不阻塞**，可以只关心最新值） | 话题是**推送**语义：客户不主动问，也不用等 | `statusTick()` → `status_pub_` | 10 Hz |
+| "机器人**此刻**确切的状态"（同步、要有返回值、要能拿到关节） | 话题只有"最新值"，**没有"我问的那一刻"**；服务才有请求-应答 | `status_service_`（`GetRobotStatus`） | 按需 |
+| "关节现在在哪？" | 和状态分开：关节数据量大、频率高，客户多半不订阅 | `publishJoints()` → `joint_pub_` | 50 Hz |
+| 坐标变换（给导航前端 / 可视化 / 客户自己算） | TF 是 ROS 2 的**基础设施**，不广播 TF 的机器人等于不存在 | `publishFrames()`：`global_frame→odom→base` 动态 + 3 个传感器静态 | 50 Hz / 一次 |
+| "去某个位置" | 长耗时动作，过程中要给进度、要能取消 → **action** | `nav_server_`（`NavigateToPose`） | 按需 |
+| "动关节 / 开关夹爪" | 同上 | `motion_server_`（`MoveToJointPositions`） | 按需 |
+
+**两个"为什么不是别的"值得单独说：**
+
+- **为什么状态既发话题又开服务？** 因为它们回答的是**不同的问题**："大概现在怎么样"（推送、可能丢帧、够用）vs "此刻到底怎么样"（同步、确切）。这不是冗余 —— 冗余是同一份数据存两处（那正是 §2.2 要消灭的）。
+- **为什么关节单独一个话题？** 因为 50 Hz × 5 个关节塞进状态话题会让状态话题变重，而多数客户只想要电量。
+
+### 1.3 它**不**做什么（刻意的功能缺口）
+
+| 缺口 | 现状 | 理由 |
+|---|---|---|
+| 不做 TF 变换 | 导航目标帧必须是 `map`，否则**拒绝** | 那是导航后端的活；mock 假装"我只在全局帧里规划" |
+| 没有障碍物模型 | `avoid_obstacles=true` 时打一次 WARN，行为上照样直冲 | 自己做一套障碍物模型＝在 mock 里重新发明导航栈 |
+| 同类目标一次只跑一个 | 第二个目标**拒绝**（`已经在导航中`） | 真实机器人也不会同时执行两条导航 |
+| 没有传感器数据 | `PerceptionConfig` 已定义话题名，但没人发 | 第 24 轮 |
+
+**"拒绝"而不是"排队"**：拒绝是**可观测**的（客户拿到 `UNAVAILABLE: action goal was rejected by the server`），排队是**静默**的（客户等到超时都不知道为什么）。宁可让客户立刻知道。
+
+### 1.4 它从 SDK 拿什么、**不**拿什么
+
+**mock 和那些 `*API` 类是契约的两侧。**
+
+```
+       客户代码
+          │ 用 Robot / StatusAPI / NavigationAPI / MotionAPI / PerceptionAPI
+          ▼
+   ┌──────────────┐
+   │ robot_sdk    │  ← 【客户端一侧】
+   └──────────────┘
+          │  DDS（话题 / 服务 / action）
+          ▼
+   ┌──────────────┐
+   │ mock_robot   │  ← 【服务端一侧】—— 它就在 DDS 的另一头
+   └──────────────┘
+```
+
+**为什么 mock 不用那些 API**：用了就是**自己给自己发目标**。运行上没意义，更糟的是 —— **mock 就不再是"独立的对方"了**，集成测试会退化成"SDK 客户端 vs SDK 客户端"，**服务端的 bug 可能被客户端的实现掩盖**。
+
+**证据**：对 mock 的每一次验收，都是**另写一个 SDK 客户端程序**（`nav_demo` / `motion_demo`）去打它。mock 自己从不调用 SDK 的 API。
+
+**mock 从 SDK 只拿两样，而且都是"契约本身"**：
+
+| 拿什么 | 为什么必须拿 | 它算"API"吗 |
+|---|---|---|
+| `config.hpp`（`RobotConfig`） | 名字、超时、容差都写在契约里；硬编码就会和 SDK **漂移** | ❌ 是契约的**定义** |
+| `types.hpp`（`Pose2D`、`toPose2D`、`distance`…） | 纯数据类型 + 几何工具 | ❌ 不是接口 |
+
+**它不拿的**：`Robot`、`StatusAPI`、`NavigationAPI`、`MotionAPI`、`PerceptionAPI`、`ActionHandle` —— 全是客户端。
+
+**为什么 SDK 有层、mock 没有层 —— 这是有意的**：
+
+| | 它的对面是谁 | 所以 |
+|---|---|---|
+| **SDK** | **人写的客户代码** | 需要一层好用的 API（`NavigationAPI` 等） |
+| **mock** | **DDS** | 是个"设备端点"，不需要面向人的 API 层 |
+
+> **⚠️ 但"没有层"不等于"可以乱"。** mock 内部仍然要有清楚的**块边界** —— 详见本文档末尾的「组织现状」一节（§10）。
+
+> **一个削弱边界可见性的细节**：mock 的类是 `robot_sdk::sim::MockRobotNode`，于是它可以**不加限定**就用到 `RobotConfig`、`Pose2D` 这些名字。好处是简洁，代价是"我是另一侧"这件事在代码里看不见。要让它可见，得把命名空间挪成 `sim::`（纯机械改动，但会让每一行都带上 `robot_sdk::` 前缀）。**当前选择简洁** —— 这条边界靠本节这段文字和 §1.1 维持。
+
+#### 1.4.1 已知边界泄漏：契约字段混在客户端 config 里
+
+**事实（量出来的）**：`robot_sdk_core` 是一个**客户端库**（`add_library(robot_sdk_core SHARED ...)`，8 个 `.cpp`：4 个 `*API`、`Robot` 门面、`runtime`、`transform`、`config`）—— 没有一个是服务端的。
+
+mock 用到的 `RobotConfig` 字段只有 10 个，**全是契约**：
+
+```
+config_.navigation.action_name / global_frame / base_frame / goal_tolerance_m
+config_.motion.action_name / joint_names / gripper_joint
+config_.status.status_topic / joint_states_topic / get_status_service
+```
+
+而 `RobotConfig` 里的**客户端专属字段**（`node_name`、`robot_namespace`、`use_sim_time`、`default_timeout_s`、`named_targets`、`gripper_open_position/closed_position`、`server_wait_timeout_s`、`perception.*`）**mock 一个都没碰**。
+
+**所以 `RobotConfig` 是两种东西混在一起**：
+
+| 类别 | 例子 | 谁需要 |
+|---|---|---|
+| **契约**（两侧都要知道） | `navigation.global_frame`、`motion.action_name`、`status.status_topic`、`joint_names`、`goal_tolerance_m` | 客户 + mock + **将来的适配器** |
+| **客户端专属**（"我怎么用它"） | `node_name`、`robot_namespace`、`default_timeout_s`、`named_targets`、`gripper_open_position`… | 只有客户 |
+
+**后果**：§1.4 那条边界是**文档级的，不是机制级的** —— 编译器不管这件事。mock 完全可以写 `config_.navigation.default_timeout_s` 而没人拦；而且它为了 `RobotConfig::fromNode`（在 `config.cpp` 里）**链接了整个客户端库**。同类情况还有 `types.hpp`（纯 `inline` 几何工具）和 `detail/action_util.hpp`（`resultCodeToString`）—— 这两样**也不是客户端专属**。
+
+**【推】什么时候该动**：当**第二个服务端**出现时。第 6 阶段的 Nav2 / MoveIt **适配器也是服务端**，它们同样需要契约的名字 —— 那时"契约混在客户端 config 里"就会被重复第三次。
+
+**可能的形状（仅选项，未定）**：
+
+```
+robot_sdk_interfaces/   ← 已有：msg / srv / action
+   + contract.hpp        ← 契约：名字 / 帧 / 关节名 / 容差
+robot_sdk_core/          ← 客户端库：*API + ActionHandle + Robot + 客户端专属配置
+robot_sdk_server/（新？） ← 服务端骨架：ActionSlot + tickAction  ← 从 robot_sdk_sim 挪出来
+robot_sdk_sim/           ← 只依赖 interfaces + contract，**不依赖客户端库**
+```
+
+**现在不动的理由**：mock 实际只用了契约字段，文档也写清楚了 —— 加包 + 改 `RobotConfig` 的对外形状会让所有客户代码受影响，**收益（边界机制化）现在换不来这个代价**。
+
+
+---
+
+## 2. 三条设计主线
+
+### 2.1 主线一：相对名 + 参数驱动 —— 让 mock 可以"变成多个机器人"
+
+```cpp
+// 构造时
+config_ = RobotConfig::fromNode(*this);          // 全部来自 ROS 参数
+status_pub_ = create_publisher<RobotStatus>(config_.status.status_topic, 10);
+```
+
+- 话题名一律**相对**（`"robot_status"`），rcl 按节点命名空间展开。
+- 于是一份代码 + 不同 launch 参数 = `/robot1/...` 和 `/robot2/...` **两个独立机器人**。
+- **SDK 不去重复实现命名空间机制** —— 那是 ROS 2 内建的（`RobotConfig::robot_namespace` 只影响节点自身）。
+
+### 2.2 主线二：**"此刻的机器人"只有一个来源**
+
+状态话题和服务查询**共用** `makeStatus()`：
+
+```cpp
+// 服务回调里
+std::lock_guard<std::mutex> lock(mutex_);
+const RobotStatus status = makeStatus(lock);
+// statusTick() 里也是同一句
+```
+
+**为什么必须共用**：不共用就是同一份事实存两份，迟早"话题说 A、服务说 B"。本类**一开始就踩过** —— 服务那份漏了 `error_code` 和 `is_estop_engaged`，靠消息默认值凑巧对了。
+
+**并且只在 `makeStatus()` 里加状态分支**：
+
+```cpp
+if (nav_.running()) {
+  status.state = RobotStatus::STATE_NAVIGATING;
+} else if (motion_.running()) {
+  status.state = RobotStatus::STATE_MOVING;
+} else if (charging_) { ... }
+```
+
+于是"新增一个状态机"**不可能**忘记同步某个出口 —— 因为只有一个出口。
+
+### 2.3 主线三：**命令与推进分离** —— 全篇最重要的一条
+
+> **只有定时器改"真值"。其他人只投递"意图"。服务连意图都不投 —— 它只读。**
+
+这条是 §3 的主题。先记住这一句，再看下面的细节。
+
+---
+
+## 3. 业务流程：谁做什么
+
+### 3.1 三条车道
+
+这个节点同时被三种东西驱动，它们跑在**不同的线程**上：
+
+```
+        ┌──────────────────────────────────────────────────────┐
+        │              MultiThreadedExecutor                    │
+        │      （按"回调组"决定把回调派给哪条线程）              │
+        └───────┬──────────────────┬────────────────┬──────────┘
+                │                  │                │
+     客户请求到达│       定时器到点  │                │
+                ▼                  ▼                ▼
+      ┌─────────────────┐  ┌──────────────┐  ┌──────────────────┐
+      │  动作回调车道    │  │  控制回路     │  │  服务回调车道     │
+      │                 │  │              │  │                  │
+      │ handleNavGoal   │  │ controlTick  │  │ status_service   │
+      │ handleNavCancel │  │   50 Hz      │  │                  │
+      │ handleNavAccepted│ │ statusTick   │  │                  │
+      │ handleMotion*   │  │   10 Hz      │  │                  │
+      └────────┬────────┘  └──────┬───────┘  └────────┬─────────┘
+               │                  │                   │
+               │ 写"意图"          │ 写"真值"           │ 只读
+               │ 投信箱            │ 读意图             │
+               ▼                  ▼                   ▼
+          ┌─────────────────────────────────────────────────┐
+          │              共享状态（mutex_ 保护）              │
+          │  nav_ / motion_ 槽位、nav_target_、…（意图）      │
+          │  pose_、joint_positions_、battery_、…（真值）     │
+          └─────────────────────────────────────────────────┘
+```
+
+**关键**：三条车道**同时**碰同一批字段 —— 这就是 `mutex_` 存在的**唯一**理由（§4）。
+
+| 车道 | 什么时候被唤醒 | 干什么 |
+|---|---|---|
+| **控制回路** | **每 20 ms**（定时器） | 推进真值；判终态；回报客户 |
+| **状态回路** | **每 100 ms**（定时器） | 推进电量/运行时间；发布状态话题 |
+| **动作回调** | 客户发目标 / 取消时（**时刻不定**） | 决定收不收；写意图；投信箱 |
+| **服务回调** | 客户查询时（**时刻不定**） | **只读**，组装应答 |
+
+### 3.2 职责划分（一句话 + 一张表）
+
+> ### 只有定时器改"真值"。其他人只投递"意图"。服务连意图都不投。
+
+**用"谁写谁读"验收（这是最硬的证据）：**
+
+| 字段 | 谁**写** | 谁**读** |
+|---|---|---|
+| `pose_`（机器人在哪） | **`navTick`** ← 控制回路 | `makeNavFeedback`、`publishFrames` |
+| `joint_positions_` | **`motionTick`** ← 控制回路 | `makeMotionFeedback`、`publishJoints`、状态服务 |
+| `battery_` / `charging_` / `uptime_s_` | **`statusTick`** ← 状态回路 | `makeStatus` |
+| `nav_` 槽位 / `nav_target_` / `nav_max_speed_` | **`handleNavGoal` / `handleNavCancel` / `handleNavAccepted`** ← 动作车道 | **`navTick`**（读并消费） |
+| `motion_` 槽位 / `motion_target_` / `motion_max_velocity_` / `motion_initial_error_` | 同上 ← 动作车道 | **`motionTick`** |
+| `joint_names_` | 构造函数 | 各处（构造后**只读**） |
+
+> **构造期例外**：`joint_names_` / `joint_positions_` 在构造函数里初始化（`ensureJoint()` 可能追加一个夹爪关节），但**构造完成后就不再变**，所以它们不在"谁写谁读"的竞争范围内。
+
+**看这张表的结构**：左边两列的"写者"**从不重叠** —— 真值只有定时器写，意图只有回调写。这不是巧合，是设计。
+
+**【量】这张表是按 §3.8 的方法 grep 验证过的**（写这份文档时跑的）：`pose_` 全文**只有一处赋值**，就在 `navTick` 里；`joint_positions_` 的赋值全在 `motionTick` 里。
+
+还有一条同样重要的（**编译器替你保证**）：
+
+```cpp
+RobotStatus makeStatus(std::lock_guard<std::mutex>& lock) const;
+//                                                        ^^^^^
+MoveToJointPositions::Feedback makeMotionFeedback(std::lock_guard<std::mutex>&) const;
+//                                                                            ^^^^^
+```
+
+**所有"只读共享状态"的函数都是 `const`** —— 它们**不可能**改成员（除非 `mutable`，而这里没有）。所以"服务不改数据"不是纪律，是**类型系统拦住的**。
+
+### 3.3 场景 A：客户查状态（**纯读**，不产生任何后续处理）
+
+```
+客户 ──请求──▶ DDS ──▶ 执行器 ──▶ 服务回调车道
+                                     │
+                                     ├─ 拿 mutex_
+                                     ├─ makeStatus(lock)   ← 只读 pose_ / joints / battery_
+                                     ├─ 写 response（自己的局部对象）
+                                     └─ 放 mutex_
+                                     │
+客户 ◀──应答───────────────────────────┘
+                                 ↑ 没有"后续"，没有任何成员字段被改
+```
+
+**这就是为什么这个场景不需要定时器参与** —— 它没有产生任何"待处理的东西"。
+
+### 3.4 场景 B：客户发导航目标（**写意图 → 定时器推进**）
+
+```
+① 客户 ──goal──▶ DDS ──▶ 执行器 ──▶ 动作回调车道
+                                        │
+                             handleNavGoal:
+                             ├─ 拿 mutex_
+                             ├─ 已经在导航？ → 拒绝（可观测，见 §1.3）
+                             ├─ nav_.reserve()            ← 【写意图】占位
+                             ├─ nav_target_ = (2.0, 1.0)  ← 【写意图】去哪儿
+                             ├─ nav_max_speed_ = 0.5      ← 【写意图】多快
+                             └─ 放 mutex_
+                             ↑ 机器人**一动没动**，pose_ 还是 (0,0)
+
+② 框架紧接着（同一线程）──▶ handleNavAccepted:
+                             └─ nav_.begin(handle)        ← 【写意图】相位→kRunning + 句柄就位
+
+③ 从此每 20 ms，控制回路车道：
+                             navTick:
+                             ├─ 拿 mutex_
+                             ├─ 看到 kRunning → pose_ 朝目标走一步   ← 【改真值】
+                             ├─ 到了吗？没到 → 每 5 拍组装一条反馈（锁内）
+                             └─ 放 mutex_
+                             └─ 锁外：publish_feedback / succeed      ← 框架调用
+
+④ 客户的取消请求随时可能到 ──▶ 动作回调车道（见场景 C）
+```
+
+**注意 ③ 的 `navTick` 永远从容、周期固定** —— 它不需要知道客户是谁、什么时候来的。
+
+### 3.5 场景 C：导航中取消（**投信箱 → 下一拍消费**）
+
+```
+客户 ──取消──▶ DDS ──▶ 执行器 ──▶ 动作回调车道
+                                     │
+                          handleNavCancel:
+                          ├─ 问框架 goal_handle->is_active()（锁外）
+                          ├─ 拿 mutex_
+                          ├─ nav_.cancel_requested = true   ← 【投一位信箱】
+                          └─ 放 mutex_
+                          └─ 返回 ACCEPT
+                          ↑ 取消回调**也不移动机器人**
+
+        ┌─ 下一拍（最多 20 ms 后）─────────────────────────────┐
+        │  navTick:                                          │
+        │  ├─ 拿 mutex_                                      │
+        │  ├─ 看到信箱 → slot.finish()                        │
+        │  ├─ 造 result（"canceled by client"）                │
+        │  └─ 放 mutex_                                      │
+        │  └─ 锁外：handle->canceled(result)                 │
+        └────────────────────────────────────────────────────┘
+```
+
+**为什么是信箱而不是"取消回调里直接停"**：见 §5.4。
+
+### 3.6 为什么必须这么分（不是随便分的）
+
+因为**两者的时间特性完全不同**：
+
+| | 回调（动作 / 服务） | 定时器（控制回路） |
+|---|---|---|
+| **什么时候执行** | 事件驱动，**时刻不定** | **固定 20 ms** |
+| **在哪个线程** | 任意（可重入组，可能并发） | 控制回路那一条 |
+| **执行多快** | 取决于客户什么时候来 | 必须可预测 |
+
+- **如果让回调推进机器人**：客户晚 300 ms 发目标，第一步就走得晚 300 ms，步长取决于客户到达的时刻 —— **模拟出的运动速度就会随网络抖动变化**。【推】
+- **如果让定时器做决定**：定时器**不知道**客户的意图（去哪儿、多快、要不要取消）—— 它没法决定。
+
+> **所以：回调负责"要不要接、接什么"（意图），定时器负责"每 20 ms 推进一步"（真值）。**
+
+### 3.7 三条铁律（从上面的划分直接推出的"不要做什么"）
+
+以后往这个节点里加东西，先过这三条：
+
+| 铁律 | 违反的后果 |
+|---|---|
+| **1. 任何回调里都不许改"真值"** | 步长随客户到达时刻抖动；并发下还会绕过定时器节奏 |
+| **2. 任何回调里都不许"推进"（循环/等待/逐步移动）** | 回调占住车道，客户的下一个请求被堵；且与定时器冲突 |
+| **3. 真值只能在 `timer_group_` 的车道里改** | 否则 §3.2 那张表的"写者不重叠"就不再成立，锁的论证（§4.3）也跟着失效 |
+
+**加一个新能力的正确姿势**：给回调加"写意图"的代码（一个槽位 + 几个目标字段），给 `controlTick` 加一个 `xxxTick()`。**不要**把逻辑写进回调。
+
+### 3.8 怎么自查
+
+划分是否还成立，两个 `grep` 就能验：
+
+```bash
+# ① 真值 pose_ 应该只在 navTick 里被赋值
+grep -n "pose_ =" ws/src/robot_sdk_sim/src/mock_robot_node.cpp
+
+# ② 动作状态只应经由槽位
+#    （reserve / begin / finish / cancel_requested / feedback_divider）
+grep -n "nav_\.\|motion_\." ws/src/robot_sdk_sim/src/mock_robot_node.cpp
+```
+
+- ① 的输出里出现"回调里直接改真值"就是破了规矩。
+- ② 的输出里出现 `nav_phase = ...` 这种**直接写相位**（而不是走 `reserve/begin/finish`）就是破了规矩 —— 那等于绕过了 §5.2 那个"由构造保证"的护栏。
+- `feedback_divider` 是个**没有不变量的哑计数器**，直接读写可以接受；`phase` / `handle` 不行。
+
+---
+
+## 4. 并发模型
+
+§3 讲的是**谁做什么**；这一节讲**这些车道在框架里怎么落地**、以及为什么这样落地。
+
+### 4.1 三个回调组
+
+`mock_robot_main.cpp` 用 `MultiThreadedExecutor`（**不是** `rclcpp::spin`）—— 单线程执行器下"可重入组"毫无意义，整个并发设计会**静默退化**。
+
+| 组 | 类型 | 成员 | 为什么 |
+|---|---|---|---|
+| `timer_group_` | `MutuallyExclusive` | `control_timer_`(50 Hz)、`status_timer_`(10 Hz) | 两个 tick 都改同一批状态。**让它们串行**，比让它们并发再抢锁简单得多 |
+| `service_group_` | `MutuallyExclusive` | `status_service_` | 客户触发的活，**不该占控制回路的车道**（见 §4.4 的实测） |
+| `action_group_` | `Reentrant` | 两个动作服务端的全部回调 | **故意相反**：目标/取消必须在控制回路跑着的时候到达 —— 才是 §3 说的"真的并发" |
+
+> **如果哪天有人把 `action_group_` 改成 `MutuallyExclusive`，`mutex_` 就变成纯开销**，而且会给人一种"并发已被正确保护"的错觉。改这一行之前先想清楚。
+
+### 4.2 关于"排队"：别把三件事混在一起
+
+说"客户要排队"，其实有**三件不同的事**：
+
+**① 组这一层的机制**（rclcpp 头文件原文，`callback_group.hpp:190`）：
+
+```
+The resulting bool will be false in the case that an executor is currently
+using an executable entity from this group, **and the group policy doesn't
+allow a second take (eg mutual exclusion)**
+```
+
+即：`MutuallyExclusive` 组有一个原子标志 `can_be_taken_from()`，**只要组里有一个回调在跑，执行器就不会再取这个组的第二个回调**。这就是"一次一个"的实现。
+
+**② 服务这一层**：**一个服务 = 一个实体 = 一个请求队列**。6 个客户端同时请求 → 6 个请求全进**同一个**队列 → 执行器一次只派一个 → **客户之间必然排队**。
+
+**③ 所以两件事要分开看**：
+
+| | 排队发生在哪 | 挪 `service_group_` 能改善吗 |
+|---|---|---|
+| **6 个客户之间** | 服务实体内（同一个队列） | ❌ **不能** —— 与分组无关 |
+| **服务 vs 50 Hz 控制定时器** | **共用同一个组的占用标志** | ✅ **能** —— 这正是 §4.4 实测到抖动翻倍的原因 |
+
+> **一句话**：挪组解决的是**"服务和定时器互堵"**，不是**"客户之间互堵"**。
+> 要让客户之间也不排队，得换 `Reentrant` 组让服务回调**并发执行** —— 那就得处理并发。【推】这条没实测。
+
+### 4.3 三条锁纪律
+
+| 纪律 | 说明 |
+|---|---|
+| **1. 锁内只碰数据，绝不调框架** | `succeed()` / `canceled()` / `publish_feedback()` / `sendTransform()` 全在锁外。它们会走 DDS，持锁做 I/O 会把 §3 的另一条车道堵住 |
+| **2. 绝不在锁内调用户回调** | mock 里没有用户代码，但 SDK 里这条纪律决定了"用非递归锁还是递归锁"（见 §6.3） |
+| **3. 需要"调用方必须持锁"的函数，用凭证而不是自己加锁** | `makeStatus(std::lock_guard<std::mutex>&)` —— 见 §6.1 |
+
+**纪律 1 的一个反面教材（已修）**：`publishFrames()` 原来是
+
+```cpp
+std::lock_guard<std::mutex> lock(mutex_);
+tf_broadcaster_->sendTransform(...);   // ← DDS I/O 在锁里
+```
+
+而同一文件里 `publishJoints()` 一直是"锁内拷数据、锁外发布"。**同一份文件里两种写法** —— 说明这条纪律靠人记是记不住的。现在改成一致的写法。
+
+### 4.4 实测：把状态查询从控制回路车道上挪开
+
+**问题**：`status_service_` 原来和 50 Hz 控制定时器同在 `timer_group_`（`MutuallyExclusive`）—— 客户查状态会**排在控制回路的车道上**（§4.2 的第 ③ 行）。
+
+**频率计**：`/joint_states` 由 `controlTick()` 里的 `publishJoints()` 发布，所以它的频率就是控制回路的频率。
+
+**负载**：6 个并发客户端猛灌 `GetRobotStatus`（`include_joint_states=true`），合计 **~3968 次/秒**。
+
+| 场景 | 平均频率 | 抖动 std | 最坏间隔 |
+|---|---|---|---|
+| 无负载 | **49.999 Hz** | 0.52 ms | 23 ms |
+| 共组（`timer_group_`），~4000 req/s | **49.896 Hz** | **1.67 ms** | **51 ms** |
+| 独立组（`service_group_`），**同负载** | **49.996 Hz** | **0.80 ms** | **25 ms** |
+
+**【量】** 两次负载测量**只差"组"这一个变量**，所以抖动差异可以归因到分组：
+
+- **吞吐几乎不受影响**（−0.2%）—— 服务回调本身只有微秒级
+- **但抖动变差一倍以上**（最坏间隔 23 → 51 ms）
+- 挪到独立组后抖动回到接近基线（0.80 vs 0.52 ms，剩余部分是一般 CPU 负载）
+
+> **诚实标注**：每档只测了一次；但这是**受控对照**（唯一变量是分组），比重复测量更能说明因果。
+
+**顺带一个反例（不是回归）**：在 ~4000 req/s 下，客户端自己的 2 秒服务超时**偶尔会超**（5 次重跑出现 1 次）。原因见 §4.2 的第 ② 条 —— **与分组无关**。
+
+### 4.5 为什么是**一把**粗锁（而不是 pose 锁 + 关节锁 + 导航锁 + 运动锁）
+
+**【推】** 论证如下：
+
+1. **写者全在一条车道上**：`controlTick` 和 `statusTick` 都在 `timer_group_`（`MutuallyExclusive`）里 —— **写者之间根本没有并发**（这正是 §3.7 铁律 3 要保住的性质）。
+2. 唯一与写者并发的是 `service_group_`（只读状态）和 `action_group_`（读状态 + 写**意图**，而意图不在真值那一列）。
+3. 所以拆成 4 把锁**减少不了任何竞争**，只会新增"锁序不一致"的风险。
+
+**判据和 §6.3 的 `recursive_mutex` 一模一样**：*先确认真的有并发，再决定要不要加机制。* 拆锁是"看起来更专业"的做法，但在这个访问模式下它买到的是零。
+
+> 什么时候该重新考虑：**当 mock 需要多个独立机器人真并发时**（比如一个进程跑 10 个 mock），或者某个 tick 变成耗时操作时。现在不是。
+
+---
+
+## 5. 动作服务端：`ActionSlot` + `tickAction`
+
+### 5.1 问题：两套骨架在抄
+
+第 22 轮写完导航服务端，第 23 轮我**照着抄了一遍**做运动服务端。抄出来的是：
+
+- `navTick` 64 行 / `motionTick` 67 行，其中约 **45 行是骨架**（局部变量、加锁、空转、取消分支、终态回调、反馈发布），只有 ~20 行是各自真正的逻辑
+- **5 个状态成员 × 2**：`goal_handle_` / `active_` / `reserved_` / `cancel_requested_` / `feedback_divider_`
+- **最有说服力的证据**：修一个"悬空句柄"bug 要在**两个地方**改。加第三个 action 就是三处 —— **纪律靠人肉同步**。
+
+### 5.2 关键决定：**三态枚举，而不是三个 bool**
+
+原来的三个 bool 是 `reserved` / `active` / `cancel_requested`。
+
+> **3 个 bool 有 8 种组合，只有 4 种合法。**
+> 而 `reserved && active` 正是非法组合之一 —— **那个悬空句柄 bug 就住在那里**。
+
+所以"不优雅"不是审美问题，是**非法状态可以被表达出来**。改成：
+
+```cpp
+enum class Phase {
+  kIdle,     // 没有目标
+  kReserved, // 目标已被接受，但 handle 还没到（框架在两个回调之间）
+  kRunning,  // 句柄到位，正在跑
+};
+```
+
+**这个枚举真正买到的东西**：
+
+```cpp
+void begin(std::shared_ptr<ServerGoalHandle<Action>> h) {
+  handle = std::move(h);
+  phase = Phase::kRunning;      // ← 与 handle 在同一个临界区改变
+}
+```
+
+于是 **`kRunning` 蕴含 `handle` 非空** —— 由**构造**保证，不靠时序。`tickAction` 里只要
+
+```cpp
+if (!slot.running()) return;   // 空转 —— 也顺带保证下面的 handle 非空
+```
+
+就消掉了整类 bug，而且**这个保证只需要维护一处**。
+
+**为什么不把 `cancel_requested` 也并进枚举**：它是**一位信箱**（取消回调投递、控制回路取走，见 §3.5），**任何相位都可能到达** —— 连 `kIdle` 都可能（取消回调里 `is_active()` 与加锁之间目标可能已结束，见 `学习笔记.md` §7.8）。它是"待处理的请求"，不是"状态"，所以留在外面。
+
+### 5.3 `tickAction`：只写一遍的骨架
+
+```cpp
+template <typename Action, typename Advance>
+void tickAction(std::mutex &mutex, ActionSlot<Action> &slot, Advance &&advance) {
+  // 锁内：推进数据 + 判定终态（不碰框架）
+  //   1. 不 running → 直接返回
+  //   2. 有取消请求 → 造 result（"canceled by client"）
+  //   3. 否则 → 调 advance(lock, result, feedback)   ← 各动作的实质逻辑
+  // 锁外：succeed / canceled / publish_feedback
+}
+```
+
+三个设计点值得说：
+
+1. **`advance` 在锁内被调用**，所以它拿得到凭证 `lock`（`makeNavFeedback(lock)` 需要它）。锁纪律因此**不可能被绕过** —— 不是因为程序员记得，而是因为类型要求。
+2. **"返回非空 result"即表示完成**，不用 `bool done` 出参。少一个能写错的开关：原来五个 `bool` 局部变量（`send_feedback` / `done` / `canceled` …）现在只剩骨架内部的一个 `canceled`。
+3. **`slot.finish()` 由骨架统一调用** —— 各动作不用记着复位状态（对应 §3.7 的自查方式）。
+
+改造后：`navTick` 64→27 行，`motionTick` 67→33 行，**10 个散装成员 → 2 个槽位**。
+
+### 5.4 取消：一位信箱，**不是** `goal_handle->is_canceling()`
+
+取消回调只做一件事（§3.5 场景 C）：
+
+```cpp
+if (!goal_handle->is_active()) return CancelResponse::REJECT;
+std::lock_guard<std::mutex> lock(mutex_);
+nav_.cancel_requested = true;          // ← 只投一位信箱
+return CancelResponse::ACCEPT;
+```
+
+真正的"停下来 + 回 `canceled()`"交给 50 Hz 控制回路。
+
+- **为什么不直接调 `handle->canceled()`**：那就成了"回调里推进/回报"，违反 §3.7 铁律 1 和 2。
+- **为什么不在取消回调里问框架**（`is_canceling()`）：在持有 `mutex_` 时问框架，会让"我不会死锁"这个结论**依赖 `rclcpp_action` 未公开的内部实现**（哪个锁在哪个回调里被持有）。框架升级一次就可能变。
+- **代价**：取消有最多一个控制周期（20 ms）的延迟。对一个模拟器完全可接受。
+
+### 5.5 那个"悬空句柄"bug 与它教的东西
+
+**症状**：`handleNavGoal` 里置了 `active_`，但 `goal_handle_` 要等 `handleNavAccepted` 才到。框架在这两次回调之间，`tick` 可以在另一条车道上跑进去 —— 此时
+
+- **第一个目标**：`goal_handle_` 是 **null** → `handle->succeed()` **空指针解引用**
+- **后续目标**：句柄是**上一个（已终态）目标**的 → 动作作用在**错的目标**上
+
+**它不是时序推测**：状态区间 `active && !handle` **每次目标都必然存在**，只是 tick 落进去的概率小（窗口约百微秒 / 周期 20 ms ≈ 0.5%）。
+
+> **诚实说明**：**没在测试里撞到过**（十几次目标，撞上的概率约 5%）。这是读代码读出来的。
+
+**这一类的通称**：**"先置标志、再补内容"**。本次会话已经出了三次（tf2 的 `spin_thread`、取消 flag 的 TOCTOU、这次）。修法永远是同一个：
+
+> **让"对外可见"和"内容就绪"在同一个临界区里完成。**
+> `begin()` 就是这句话的代码化。
+
+---
+
+## 6. 凭证式加锁：`makeStatus(lock)`
+
+### 6.1 问题
+
+有些函数**必须**在持锁状态下调用（读共享状态），但签名上没有任何东西拦着你在没持锁时调用它 —— 那是数据竞争。
+
+### 6.2 选定方案：传锁作凭证
+
+```cpp
+RobotStatus makeStatus(std::lock_guard<std::mutex>& lock) const;
+//                             ^^^^^ 参数**不命名** = 一眼看出是凭证，不是数据
+
+// 调用方
+std::lock_guard<std::mutex> lock(mutex_);
+const RobotStatus status = makeStatus(lock);
+```
+
+**为什么不干脆让它自己加锁** —— 这是被否决的方案，理由很具体：
+
+| 方案 | 误用时会发生什么 | 触发的难度 |
+|---|---|---|
+| **自己加锁** | 在已持锁处顺手调用 → **自死锁**（`std::mutex` 检测不到自锁，是 UB 不是异常，**直接挂住**） | **容易**：正常重构就会踩到 |
+| **传锁作凭证**（选定） | 忘记持锁 → 数据竞争 | **难**：`lock_guard` **不可拷贝不可默认构造**，必须真的构造一把某种 mutex 的 `lock_guard` |
+
+**可以伪造吗？** 可以 —— `std::lock_guard<std::mutex> fake(other_mutex);` **能编译**。【量】用 `adopt_lock` 假装持有也能编译（运行时 UB）；`defer_lock` 编译失败（`lock_guard` 只有 `(m)` 和 `(m, adopt_lock)`）。但伪造必须**刻意**构造别的 mutex 的 `lock_guard`，现实中不会发生。
+
+**判据是触发难度 × 后果，不是理论严密性**：
+
+> 「有洞但踩不到」 > 「没洞但一踩就中」
+
+### 6.3 被否决的其它方案
+
+| 方案 | 为什么否掉 |
+|---|---|
+| `unique_lock` + `assert(lock.mutex() == &mutex_)` | 拿 `lock_guard` 的**强类型保证**（作用域内必然持锁、不能提前解锁）换一个**只在 debug 生效**的检查 —— 一样换一样 |
+| `std::recursive_mutex` | 它把"锁内调自加锁方法"从**非法变合法**，纪律消失，问题变成**看不见**的问题 |
+| 自锁检测调试锁 | 只解决自死锁，不解决"忘记加锁"，而且生产环境里没有 |
+
+**顺带一条 SDK 全局纪律**：SDK 全项目 4 把锁**都是非递归 `std::mutex`**，因为 SDK 的原则是"**绝不在锁内调用户回调**"。
+
+> **顺序不能反**：先决定"要不要在锁内调用户代码"，**再**决定锁的类型。
+> ROS 2 官方正好是两面教材 —— 服务端全用非递归 `std::mutex` 且绝不跨越用户回调；客户端用 `std::recursive_mutex`，因为它在持锁状态下调 `goal_handle->call_feedback_callback`。
+
+---
+
+## 7. 配置边界
+
+### 7.1 `RobotConfig` 是 **SDK 契约**，`k` 常量是**模拟器私事**
+
+```cpp
+// 在 RobotConfig 里 —— 因为这是"怎么跟机器人说话"
+struct MotionConfig {
+  std::string action_name{"move_to_joint_positions"};
+  double default_timeout_s{30.0};
+  double gripper_timeout_s{5.0};    // 夹爪行程短，独立超时
+};
+
+// 在 mock 的 .cpp 里 —— 因为这是"这台**假**机器人怎么表现"
+constexpr double kBatteryDrainPerTick = 0.05;
+constexpr double kJointTolerance = 0.01;
+constexpr double kDefaultMaxSpeedMps = 0.5;
+```
+
+**为什么那些常量不进配置**：
+
+- `kBatteryDrainPerTick` 描述的是"假电池掉电多快" —— 真机不需要这个配置项。
+- **加一个没人会改的配置项本身就是债**：多一个字段、多一份文档、多一个"设错了会怎样"的问题。
+- 如果将来真要可配，应该由 **mock 自己** `declare_parameter`，**不进 SDK 的 config 结构** —— 否则 SDK 的契约里就混进了 mock 的实现细节。
+
+**判据一句话**：*换掉后端（Gazebo/真机）之后这个配置还有意义吗？* 有 → 进 `RobotConfig`；没有 → 留在 mock。
+
+### 7.2 已经踩过的坑：配置的"默认值不能撒谎"
+
+`MotionConfig::joint_names` 默认是**空 vector**，不是一套猜测的关节名。理由：mock 里有"没配就给一套默认 4 轴臂"的逻辑（那是**模拟器**的方便），但 SDK 的默认值不能假装知道你有什么关节 —— 否则 `moveToNamedTarget("home")` 会拿一套假关节名去发目标。SDK 遇到空的 `joint_names` 直接返回 `NotInitialized`。
+
+---
+
+## 8. 已知取舍（保持清醒用）
+
+| 取舍 | 现在 | 什么时候该改 |
+|---|---|---|
+| 一把粗锁 | §4.5 | 一个进程要跑多个独立机器人时 |
+| 动作槽位只有一个 | 同类目标第二个被拒绝 | 需要多目标队列时（真实机器人也罕见） |
+| 取消有一位信箱 | §5.4 | 需要"取消也要立刻回报"时（不值得） |
+| 无传感器数据 | §1.3 | 第 24 轮 |
+| 状态服务会与其他客户排队 | §4.2 第 ② 条 | 需要**硬实时**保证时（模拟器不需要） |
+| `named_targets` 只能代码赋值 | ROS 2 参数**没有 map 类型** | 等 ROS 2 支持，或改用单独的 yaml 参数 |
+
+---
+
+## 9. 文件地图
+
+```
+ws/src/robot_sdk_sim/
+├── include/robot_sdk_sim/
+│   ├── mock_robot_node.hpp     ← 类定义 + 锁纪律的注释
+│   └── action_slot.hpp         ← ActionSlot（三态）+ tickAction（每拍骨架）
+├── src/
+│   ├── mock_robot_node.cpp     ← 全部实现
+│   └── mock_robot_main.cpp     ← MultiThreadedExecutor（并发设计的入口）
+└── launch/                     ← 命名空间/参数（相对名 + 参数驱动的入口）
+
+ws/src/robot_sdk_core/          ← 契约（config.hpp 定义上面所有名字）
+ws/学习笔记.md                   ← 逐次踩坑的历史与推导过程
+ws/docs/mock-robot-node.md      ← 本文件
+```
+
+**读代码的建议顺序**：`config.hpp`（契约是什么）→ **`mock_robot_main.cpp`（§3 的几条车道）** → `mock_robot_node.hpp`（类结构与纪律）→ `action_slot.hpp`（动作骨架）→ `mock_robot_node.cpp`。
+
+---
+
+## 10. 组织现状：散点在哪
+
+> 这一节记的是**已知的可读性问题**，不是设计决定。写出来的目的是"别装作没有"。
+
+### 10.1 构造函数一口气干 10 件事
+
+`MockRobotNode::MockRobotNode()` 从第一行到最后一行约 **100 行**，按顺序做了：
+
+| # | 干什么 | 涉及成员 |
+|---|---|---|
+| 1 | 读配置 | `config_` |
+| 2 | 建定时器组 | `timer_group_` |
+| 3 | 初始化关节（含"没配就给默认 4 轴臂" + 追加夹爪） | `joint_names_` / `joint_positions_` |
+| 4 | 建 2 个发布者 | `status_pub_` / `joint_pub_` |
+| 5 | 建 2 个 TF 广播器 | `tf_broadcaster_` / `static_tf_broadcaster_` |
+| 6 | 发 3 个传感器静态变换 | `laser_frame_` / `imu_frame_` / `camera_frame_` |
+| 7 | 建服务组 + 状态服务 | `service_group_` / `status_service_` |
+| 8 | 建动作组 + **2 个动作服务端**（每个 13 行样板） | `action_group_` / `nav_server_` / `motion_server_` |
+| 9 | 建 2 个定时器 | `control_timer_` / `status_timer_` |
+| 10 | 打一行日志 | — |
+
+**症状**：想知道"这个节点提供了什么"，必须**通读 100 行**才能拼出来。
+
+### 10.2 成员与方法都是平铺的
+
+- 成员约 **25 个**，一个列表，没有分组（组 / 发布者 / 广播器 / 定时器 / 服务端 / 锁 / 真值 / 意图 / 帧名，全混在一起）
+- 方法约 **20 个**，一个列表：3 个 tick、4 个反馈/状态组装、6 个动作回调、2 个发布、1 个关节辅助
+
+**症状**：找"某个状态是谁写的"要全文搜索（§3.8 的两个 grep 就是为此准备的）。
+
+### 10.3 五个功能块 ——但它们**并不独立**
+
+功能上显然有 5 块：**状态 / 关节 / TF / 导航动作 / 关节运动动作**。
+
+看起来应该拆成 5 个类。但看依赖关系：
+
+```
+        状态块（makeStatus）
+          ↑ 读 nav_.running()、motion_.running()   ← 依赖动作块！
+          │
+  TF 块 ──┼── 读 pose_      ← 依赖导航块的产出
+          │
+关节块 ───┴── 写 joint_positions_ ← 关节运动块的产出
+```
+
+**`makeStatus()` 同时读导航和运动的状态**（§2.2 的"单一来源"要求它这么做）。
+
+所以拆成 5 个对象的话：**每一块都要拿到同一份状态 + 同一把锁**，只能互相传引用 ——
+**拆完不会少一行复杂度，只是把 `mutex_.` 换成 `state->mutex_.`**。【推】
+
+### 10.4 两个方案
+
+| 方案 | 做什么 | 代价 | 收益 |
+|---|---|---|---|
+| **A. 整理（推荐）** | **不动结构**：构造函数拆成 7 个命名的 `setupXxx()`；成员/方法按上面那 5 块分区加注释；`cpp` 里同步分节 | 纯移动，**零风险、零净增行数** | "提供了什么"变成**扫一眼标题就知道** |
+| **B. 拆成协作者** | 5 个类 + 一个共享 `RobotState` | 大（要动全部已验证代码） | 按 §10.3，**收益接近于零** |
+
+**我推荐 A。** 理由不是"B 太难"，而是 §10.3 那张依赖图：这些块共享**同一份状态和同一把锁**，拆开只会把"一起改的状态"分散到 5 个文件里 —— 那会让 §3.2 那张"谁写谁读"表**更难验**，而那张表是这个设计的核心。
+

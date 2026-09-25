@@ -19,6 +19,7 @@
 
 #include "robot_sdk/config.hpp"
 #include "robot_sdk/types.hpp"
+#include "robot_sdk_sim/action_slot.hpp"
 
 namespace robot_sdk::sim {
 
@@ -70,6 +71,9 @@ class MockRobotNode : public rclcpp::Node {
       const std::shared_ptr<GoalHandleMove> goal_handle);
   void handleMotionAccepted(const std::shared_ptr<GoalHandleMove> goal_handle);
 
+  /// 组装一条运动反馈。参数 `lock` 是凭证（同 `makeStatus`）。
+  MoveToJointPositions::Feedback makeMotionFeedback(std::lock_guard<std::mutex>& lock) const;
+
   void publishFrames();
   void publishJoints();
 
@@ -93,6 +97,9 @@ class MockRobotNode : public rclcpp::Node {
   RobotConfig config_;
 
   rclcpp::CallbackGroup::SharedPtr timer_group_;
+  /// 状态查询服务的组。**独立于 `timer_group_`**：查询是客户触发的，
+  /// 不该跟 50 Hz 控制回路共用一条车道（实测见 学习笔记.md §7.9）。
+  rclcpp::CallbackGroup::SharedPtr service_group_;
   /// 导航动作服务端的组。**故意与 `timer_group_` 相反（可重入）**：
   /// 目标/取消可以在控制回路跑着的时候到达 —— 两条车道真的并发。
   rclcpp::CallbackGroup::SharedPtr action_group_;
@@ -115,22 +122,19 @@ class MockRobotNode : public rclcpp::Node {
   Pose2D pose_{};
 
   // ── 导航状态（同样受 mutex_ 保护）──
-  std::shared_ptr<GoalHandleNavigate> nav_goal_handle_;
+  /// 动作状态收在**一个槽位**里（三态 + 句柄 + 一位取消信箱 + 反馈降频）。
+  /// 以前这里是 5 个散装成员、其中 3 个 bool —— 见 action_slot.hpp 的说明。
+  ActionSlot<NavigateToPose> nav_;
   Pose2D nav_target_{};
   double nav_max_speed_{0.0};
-  bool nav_active_{false};
-  /// 客户已经请求取消。由取消回调（框架线程）置位，控制回路消费。
-  bool nav_cancel_requested_{false};
-  /// 反馈降频用：每 N 个控制周期发一条反馈。
-  int feedback_divider_{0};
 
   // ── 关节运动状态（同样受 mutex_ 保护）──
-  std::shared_ptr<GoalHandleMove> motion_goal_handle_;
+  ActionSlot<MoveToJointPositions> motion_;
   /// 目标位置，与 `joint_positions_` **同序同长**；目标没点名的关节填当前值。
   std::vector<double> motion_target_;
   double motion_max_velocity_{0.0};
-  bool motion_active_{false};
-  bool motion_cancel_requested_{false};
+  /// 起始最大误差 —— `completion_percentage` 的分母。
+  double motion_initial_error_{0.0};
   std::vector<std::string> joint_names_;
   std::vector<double> joint_positions_;
   double battery_{100.0};

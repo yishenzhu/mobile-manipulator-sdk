@@ -92,6 +92,10 @@ MockRobotNode::MockRobotNode(const rclcpp::NodeOptions &options)
       makeTransform(stamp, base, camera_frame_, 0.2, 0.0, 0.3, 0.0));
 
   // 状态查询服务：按需给一份"此刻"的状态快照。
+  // 它跑在**独立的互斥组**里 —— 不跟 50 Hz 控制回路抢同一条车道。
+  // （放在 timer_group_ 里也能工作，但实测会让控制回路的抖动变差，见 学习笔记.md §7.9。）
+  service_group_ =
+      create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
   status_service_ = create_service<GetRobotStatus>(
       config_.status.get_status_service,
       [this](const std::shared_ptr<GetRobotStatus::Request> request,
@@ -109,7 +113,7 @@ MockRobotNode::MockRobotNode(const rclcpp::NodeOptions &options)
           response->joint_states.effort.assign(joint_names_.size(), 0.0);
         }
       },
-      rclcpp::ServicesQoS(), timer_group_);
+      rclcpp::ServicesQoS(), service_group_);
 
   // 导航动作服务端。它跑在**独立的可重入组**里：目标/取消可以在 50 Hz 控制回路
   // 运行期间到达 —— 两条车道真的并发，这正是上面那些状态需要 mutex_ 的理由。
@@ -174,9 +178,9 @@ MockRobotNode::makeStatus(std::lock_guard<std::mutex> & /*lock*/) const {
   RobotStatus status;
   status.header.stamp = now();
   status.header.frame_id = config_.navigation.base_frame;
-  if (nav_active_) {
+  if (nav_.running()) {
     status.state = RobotStatus::STATE_NAVIGATING;
-  } else if (motion_active_) {
+  } else if (motion_.running()) {
     status.state = RobotStatus::STATE_MOVING;
   } else if (charging_) {
     status.state = RobotStatus::STATE_CHARGING;
@@ -199,68 +203,31 @@ MockRobotNode::makeStatus(std::lock_guard<std::mutex> & /*lock*/) const {
 }
 
 void MockRobotNode::navTick() {
-  std::shared_ptr<GoalHandleNavigate> handle;
-  NavigateToPose::Result::SharedPtr result;
-  NavigateToPose::Feedback feedback;
-  bool send_feedback = false;
-  bool done = false;
-  bool canceled = false;
+  // 骨架负责加锁/空转/取消/终态回调/反馈发布；这里只写"这一拍做什么"。
+  tickAction<NavigateToPose>(
+      mutex_, nav_,
+      [this](std::lock_guard<std::mutex> &lock, auto &result, auto &feedback) {
+        const double remaining = distance(pose_, nav_target_);
+        if (remaining <= config_.navigation.goal_tolerance_m) {
+          pose_ = nav_target_; // 对齐，免得留下毫米级残差
+          result = std::make_shared<NavigateToPose::Result>();
+          result->success = true;
+          result->final_distance_error = static_cast<float>(remaining);
+          result->message = "reached target";
+          return; // 返回非空 result 即"完成"（骨架会收尾）
+        }
 
-  {
-    // ── 锁内：推进数据 + 判定终态 + 组装反馈（不碰框架）──
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (!nav_active_) {
-      return;
-    }
-    handle = nav_goal_handle_;
-
-    if (nav_cancel_requested_) {
-      nav_active_ = false;
-      nav_cancel_requested_ = false;
-      done = true;
-      canceled = true;
-      result = std::make_shared<NavigateToPose::Result>();
-      result->message = "canceled by client";
-    } else {
-      const double remaining = distance(pose_, nav_target_);
-      if (remaining <= config_.navigation.goal_tolerance_m) {
-        pose_ = nav_target_; // 对齐，免得留下毫米级残差
-        nav_active_ = false;
-        done = true;
-        result = std::make_shared<NavigateToPose::Result>();
-        result->success = true;
-        result->final_distance_error = static_cast<float>(remaining);
-        result->message = "reached target";
-      } else {
         // 朝目标走一步，并把朝向转向目标（模拟一个会转头的前进底盘）。
-        const double step =
-            std::min(nav_max_speed_ * kControlPeriodS, remaining);
+        const double step = std::min(nav_max_speed_ * kControlPeriodS, remaining);
         pose_.x += step * (nav_target_.x - pose_.x) / remaining;
         pose_.y += step * (nav_target_.y - pose_.y) / remaining;
-        pose_.yaw =
-            std::atan2(nav_target_.y - pose_.y, nav_target_.x - pose_.x);
+        pose_.yaw = std::atan2(nav_target_.y - pose_.y, nav_target_.x - pose_.x);
 
-        if (++feedback_divider_ >= kFeedbackEveryNTicks) {
-          feedback_divider_ = 0;
-          send_feedback = true;
-          feedback = makeNavFeedback(lock); // ← 传锁作凭证
+        if (++nav_.feedback_divider >= kFeedbackEveryNTicks) {
+          nav_.feedback_divider = 0;
+          feedback = std::make_shared<NavigateToPose::Feedback>(makeNavFeedback(lock));
         }
-      }
-    }
-  } // ← 锁在这里放掉：下面全是框架调用（I/O）
-
-  if (done) {
-    if (canceled) {
-      handle->canceled(result);
-    } else {
-      handle->succeed(result);
-    }
-    return;
-  }
-  if (send_feedback) {
-    handle->publish_feedback(
-        std::make_shared<NavigateToPose::Feedback>(feedback));
-  }
+      });
 }
 
 rclcpp_action::GoalResponse
@@ -278,15 +245,15 @@ MockRobotNode::handleNavGoal(const rclcpp_action::GoalUUID & /*uuid*/,
   {
     // 锁内只碰数据：占位 + 记下目标。日志与回复都放到锁外。
     std::lock_guard<std::mutex> lock(mutex_);
-    busy = nav_active_;
+    busy = nav_.busy();
     if (!busy) {
-      nav_active_ = true; // 占位：防止并发到达的第二个目标也被接受
-      // 清掉可能残留的取消请求（与取消回调存在竞态，见 学习笔记.md §7.8）。
-      nav_cancel_requested_ = false;
+      // reserve() 只置"占位"相位，**不置 kRunning** —— 句柄要等 accepted 回调才到，
+      // 而 kRunning 一旦成立，navTick 就会拿句柄去回调框架，那个窗口里它还是空的。
+      // 它顺手清掉残留的取消请求（与取消回调存在竞态，见 学习笔记.md §7.8）。
+      nav_.reserve();
       nav_target_ = toPose2D(goal->target_pose);
       nav_max_speed_ =
           goal->max_speed > 0.0f ? goal->max_speed : kDefaultMaxSpeedMps;
-      feedback_divider_ = 0;
     }
   }
 
@@ -308,10 +275,10 @@ rclcpp_action::CancelResponse MockRobotNode::handleNavCancel(
     return rclcpp_action::CancelResponse::REJECT;
   }
 
-  // 只拨一个 flag，真正的"停下来 + 回 canceled()"交给控制回路。
+  // 只投一位信箱，真正的"停下来 + 回 canceled()"交给控制回路。
   // 为什么不直接调 goal_handle->is_canceling()：见 学习笔记.md §7.8。
   std::lock_guard<std::mutex> lock(mutex_);
-  nav_cancel_requested_ = true;
+  nav_.cancel_requested = true;
   return rclcpp_action::CancelResponse::ACCEPT;
 }
 
@@ -321,7 +288,9 @@ void MockRobotNode::handleNavAccepted(
   double speed = 0.0;
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    nav_goal_handle_ = goal_handle;
+    // 句柄与相位在**同一个临界区**里改变 → kRunning 蕴含 handle 非空
+    // （见 action_slot.hpp）：不靠时序，靠构造。
+    nav_.begin(goal_handle);
     target = nav_target_;
     speed = nav_max_speed_;
   }
@@ -346,61 +315,58 @@ MockRobotNode::makeNavFeedback(std::lock_guard<std::mutex> & /*lock*/) const {
   return feedback;
 }
 
-void MockRobotNode::motionTick() {
-  std::shared_ptr<GoalHandleMove> handle;
-  MoveToJointPositions::Result::SharedPtr result;
-  bool done = false;
-  bool canceled = false;
+MockRobotNode::MoveToJointPositions::Feedback MockRobotNode::makeMotionFeedback(
+    std::lock_guard<std::mutex> & /*lock*/) const {
+  // 参数不命名 = 凭证（同 makeStatus）。
+  MoveToJointPositions::Feedback feedback;
+  feedback.current.header.stamp = now();
+  feedback.current.name = joint_names_;
+  feedback.current.position = joint_positions_;
 
-  {
-    // ── 锁内：推进数据 + 判定终态（不碰框架）──
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (!motion_active_) {
-      return;
-    }
-    handle = motion_goal_handle_;
-
-    if (motion_cancel_requested_) {
-      motion_active_ = false;
-      motion_cancel_requested_ = false;
-      done = true;
-      canceled = true;
-      result = std::make_shared<MoveToJointPositions::Result>();
-      result->message = "canceled by client";
-    } else {
-      // 每个关节各自朝目标走一步。`|误差| <= 本拍行程` 时直接对齐 ——
-      // 既避免过冲，也让"误差恰好为 0"不会把关节推离目标。
-      const double step = motion_max_velocity_ * kControlPeriodS;
-      double worst = 0.0;
-      for (std::size_t i = 0; i < joint_positions_.size(); ++i) {
-        const double error = motion_target_[i] - joint_positions_[i];
-        if (std::abs(error) <= step) {
-          joint_positions_[i] = motion_target_[i];
-        } else {
-          joint_positions_[i] += std::copysign(step, error);
-        }
-        worst = std::max(worst, std::abs(motion_target_[i] - joint_positions_[i]));
-      }
-
-      if (worst <= kJointTolerance) {
-        joint_positions_ = motion_target_; // 对齐，免得留下残差
-        motion_active_ = false;
-        done = true;
-        result = std::make_shared<MoveToJointPositions::Result>();
-        result->success = true;
-        result->final_position_error = static_cast<float>(worst);
-        result->message = "reached target";
-      }
-    }
-  } // ← 锁在这里放掉：下面全是框架调用
-
-  if (done) {
-    if (canceled) {
-      handle->canceled(result);
-    } else {
-      handle->succeed(result);
-    }
+  double worst = 0.0;
+  for (std::size_t i = 0; i < joint_positions_.size(); ++i) {
+    worst = std::max(worst, std::abs(motion_target_[i] - joint_positions_[i]));
   }
+  // 完成度 = 从"起始最大误差"缩到"当前最大误差"的比例；起始就是 0 视为已完成。
+  feedback.completion_percentage =
+      motion_initial_error_ > 0.0
+          ? static_cast<float>(100.0 * (1.0 - worst / motion_initial_error_))
+          : 100.0f;
+  return feedback;
+}
+
+void MockRobotNode::motionTick() {
+  // 同 navTick：骨架一样，只有中间这段"推进"不同。
+  tickAction<MoveToJointPositions>(
+      mutex_, motion_,
+      [this](std::lock_guard<std::mutex> &lock, auto &result, auto &feedback) {
+        // 每个关节各自朝目标走一步。`|误差| <= 本拍行程` 时直接对齐 ——
+        // 既避免过冲，也让"误差恰好为 0"不会把关节推离目标。
+        const double step = motion_max_velocity_ * kControlPeriodS;
+        double worst = 0.0;
+        for (std::size_t i = 0; i < joint_positions_.size(); ++i) {
+          const double error = motion_target_[i] - joint_positions_[i];
+          if (std::abs(error) <= step) {
+            joint_positions_[i] = motion_target_[i];
+          } else {
+            joint_positions_[i] += std::copysign(step, error);
+          }
+          worst = std::max(worst, std::abs(motion_target_[i] - joint_positions_[i]));
+        }
+
+        if (worst <= kJointTolerance) {
+          joint_positions_ = motion_target_; // 对齐，免得留下残差
+          result = std::make_shared<MoveToJointPositions::Result>();
+          result->success = true;
+          result->final_position_error = static_cast<float>(worst);
+          result->message = "reached target";
+        } else if (++motion_.feedback_divider >= kFeedbackEveryNTicks) {
+          // 反馈不必跟控制同频（同导航）：50 Hz 控制、10 Hz 反馈。
+          motion_.feedback_divider = 0;
+          feedback =
+              std::make_shared<MoveToJointPositions::Feedback>(makeMotionFeedback(lock));
+        }
+      });
 }
 
 rclcpp_action::GoalResponse MockRobotNode::handleMotionGoal(
@@ -418,7 +384,7 @@ rclcpp_action::GoalResponse MockRobotNode::handleMotionGoal(
   {
     // 锁内只碰数据：先在**局部**把目标拼好，全部合法才提交（不留半成品状态）。
     std::lock_guard<std::mutex> lock(mutex_);
-    busy = motion_active_;
+    busy = motion_.busy();
     if (!busy) {
       std::vector<double> target = joint_positions_; // 目标没点名的关节保持原位
       for (std::size_t k = 0; k < goal->target.name.size(); ++k) {
@@ -435,9 +401,15 @@ rclcpp_action::GoalResponse MockRobotNode::handleMotionGoal(
         motion_target_ = std::move(target);
         motion_max_velocity_ =
             goal->max_velocity > 0.0f ? goal->max_velocity : kDefaultJointVelocity;
-        motion_active_ = true; // 占位：防止并发到达的第二个目标也被接受
-        // 残留的取消请求不能影响新目标（同 handleNavGoal，见 学习笔记.md §7.8）。
-        motion_cancel_requested_ = false;
+        // reserve() 只置"占位"相位（理由同 handleNavGoal），
+        // 并顺手清掉残留的取消请求、复位反馈降频。
+        motion_.reserve();
+        // 起始最大误差 —— completion_percentage 的分母。
+        motion_initial_error_ = 0.0;
+        for (std::size_t i = 0; i < motion_target_.size(); ++i) {
+          motion_initial_error_ = std::max(
+              motion_initial_error_, std::abs(motion_target_[i] - joint_positions_[i]));
+        }
       }
     }
   }
@@ -460,14 +432,14 @@ rclcpp_action::CancelResponse MockRobotNode::handleMotionCancel(
     return rclcpp_action::CancelResponse::REJECT;
   }
   std::lock_guard<std::mutex> lock(mutex_);
-  motion_cancel_requested_ = true;
+  motion_.cancel_requested = true;
   return rclcpp_action::CancelResponse::ACCEPT;
 }
 
 void MockRobotNode::handleMotionAccepted(
     const std::shared_ptr<GoalHandleMove> goal_handle) {
   std::lock_guard<std::mutex> lock(mutex_);
-  motion_goal_handle_ = goal_handle;
+  motion_.begin(goal_handle); // 句柄与相位同时改变（理由同 handleNavAccepted）
 }
 
 void MockRobotNode::controlTick() {
@@ -503,15 +475,20 @@ void MockRobotNode::statusTick() {
 }
 
 void MockRobotNode::publishFrames() {
-  std::lock_guard<std::mutex> lock(mutex_);
-  const auto stamp = now();
+  Pose2D pose;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    pose = pose_;
+  }
+  // 锁外做 I/O —— sendTransform 会走 DDS，不该占着锁（同 publishJoints）。
   // 这里是模拟机器人的"真值"：它假装 odom 与 global_frame 重合，
   // 于是把位姿直接发成 odom -> base 的变换。
+  const auto stamp = now();
   tf_broadcaster_->sendTransform(makeTransform(
       stamp, config_.navigation.global_frame, "odom", 0.0, 0.0, 0.0, 0.0));
   tf_broadcaster_->sendTransform(
-      makeTransform(stamp, "odom", config_.navigation.base_frame, pose_.x,
-                    pose_.y, 0.0, pose_.yaw));
+      makeTransform(stamp, "odom", config_.navigation.base_frame, pose.x, pose.y, 0.0,
+                    pose.yaw));
 }
 
 void MockRobotNode::publishJoints() {
