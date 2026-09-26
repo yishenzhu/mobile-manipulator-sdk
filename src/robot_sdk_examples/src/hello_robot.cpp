@@ -34,15 +34,18 @@ int main(int argc, char **argv) {
 
   // ── 状态：两种拿法，回答的是不同的问题 ──
 
-  // ① 缓存快照：话题推送的最新一条，"大概现在怎么样"。
+  // ① 缓存快照：等来**这一条**，字段就从它上面读 ——
+  //    别一边拿着"这一条"，一边又去调 API 读"此刻最新那一条"（那是两个来源）。
   if (auto status = robot.status().waitForStatus(5s); status.ok()) {
-    std::printf("状态  : state=%u  健康=%d  电量=%.1f%%  充电中=%d\n",
-                status.value()->state, robot.status().isHealthy() ? 1 : 0,
-                robot.status().batteryPercentage(),
-                status.value()->is_charging ? 1 : 0);
+    std::printf("状态  : state=%u  电量=%.1f%%  充电中=%d\n", status.value()->state,
+                status.value()->battery_percentage, status.value()->is_charging);
   } else {
     std::printf("状态  : %s\n", status.error().toString().c_str());
   }
+
+  // API 上还有几个"就地判断"的便捷方法 —— 它们读的是**此刻最新**那条，
+  // 未必和上面拿到的是同一条。要合成判断（比如"健康"是若干字段的综合）就用它：
+  std::printf("健康  : %d\n", robot.status().isHealthy() ? 1 : 0);
 
   // ② 服务查询：一次请求/应答，"此刻确切的"。
   if (auto queried = robot.status().queryStatus(5s); queried.ok()) {
@@ -54,6 +57,9 @@ int main(int argc, char **argv) {
   // ── 传感器：都是"最新一帧"语义，**不是消息队列** ——
   //    每秒 10 帧的雷达，你晚来一步就直接拿到最新那帧，不会排队等你消费。
   if (auto scan = robot.perception().waitForLaserScan(5s); scan.ok()) {
+    // 注意：`nearestObstacleDistance` 是 API 上算出来的便捷量，读的是**最新一帧**，
+    // 严格说不保证就是我们手上这一帧。这里图省事这么写；
+    // 要严格对应，就自己在我们拿到的这一帧的 ranges 上找最小值。
     std::printf("激光  : %zu 条射线，正前方最近障碍 %.2f m\n",
                 scan.value()->ranges.size(),
                 robot.perception().nearestObstacleDistance(-0.02, 0.02));

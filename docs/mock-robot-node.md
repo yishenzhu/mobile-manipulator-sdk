@@ -2,6 +2,9 @@
 
 > **阅读顺序**：§1（它要做什么）→ **§3（业务流程：谁做什么）** → §4（并发模型）→ §5（动作服务端）。
 > 本文只讲**为什么这样写**；逐行 API 看代码本身；逐次踩坑的历史看 `ws/学习笔记.md`。
+>
+> **本文是「mock 内部怎么设计」**。如果你更想知道「SDK 怎么被调用、`spin()` 到底在干什么、
+> 和手写 ROS 2 有什么区别」—— 看姊妹文档 **`sdk-call-flow.md`**（那份更偏入门，图更多）。
 
 ## 0. 本文的结论分两类
 
@@ -703,7 +706,8 @@ ws/src/robot_sdk_sim/
 ws/src/robot_sdk_core/          ← 契约（config.hpp 定义上面所有名字）
 ws/src/robot_sdk_examples/      ← **客户代码长什么样**：hello_robot / demo_navigation
 ws/学习笔记.md                   ← 逐次踩坑的历史与推导过程
-ws/docs/mock-robot-node.md      ← 本文件
+ws/docs/mock-robot-node.md      ← 本文件（mock 的内部设计）
+ws/docs/sdk-call-flow.md        ← 姊妹文档（SDK 调用流程 + 与手写 ROS 2 对比，偏入门）
 ```
 
 **读代码的建议顺序**：`config.hpp`（契约是什么）→ **`mock_robot_main.cpp`（§3 的几条车道）** → `mock_robot_node.hpp`（类结构与纪律）→ `action_slot.hpp`（动作骨架）→ `mock_robot_node.cpp`。

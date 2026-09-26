@@ -59,7 +59,7 @@ class StatusAPI {
   /// 返回的订阅由本 API 持有；拿它主要是为了查 QoS，随手丢掉也没问题。
   rclcpp::Subscription<RobotStatus>::SharedPtr onStatus(StatusCallback callback);
 
-  /// error_code == 0、不在 ERROR 状态、且没有急停。
+  /// 机器人健康吗？读的是**缓存里最新那条**，不是"此刻"（要此刻用 queryStatus()）。
   bool isHealthy() const;
 
   /// 电量百分比；状态未知时返回 NaN。
