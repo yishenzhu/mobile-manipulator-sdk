@@ -38,6 +38,9 @@ constexpr double kDefaultJointVelocity = 0.5;
 
 // 传感器：控制回路 50 Hz → 传感器 10 Hz。
 constexpr int kSensorEveryNTicks = 5;
+// 底盘命令：超过这么久没收到新的 cmd_vel 就当停车。
+// 真底盘也这样 —— 命令丢了不该继续冲。
+constexpr double kCmdVelTimeoutS = 0.5;
 // 激光：一圈 1° 分辨率，量程照常见 2D 雷达填。
 constexpr int kScanRays = 360;
 constexpr double kScanRangeMin = 0.05;
@@ -272,6 +275,24 @@ MockRobotNode::MockRobotNode(const rclcpp::NodeOptions &options)
         handleMotionAccepted(handle);
       },
       rcl_action_server_get_default_options(), action_group_);
+
+  // 底盘命令入口。话题名是 **mock 自己的参数**（不属于 SDK 契约：客户从不发 cmd_vel），
+  // 这样换 Nav2 配置时不用改代码。
+  const std::string cmd_vel_topic =
+      declare_parameter<std::string>("cmd_vel_topic", "cmd_vel");
+  cmd_group_ = create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+  rclcpp::SubscriptionOptions cmd_options;
+  cmd_options.callback_group = cmd_group_;
+  cmd_vel_sub_ = create_subscription<geometry_msgs::msg::Twist>(
+      cmd_vel_topic, rclcpp::QoS(10),
+      [this](geometry_msgs::msg::Twist::ConstSharedPtr msg) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        cmd_linear_ = msg->linear.x;
+        cmd_angular_ = msg->angular.z;
+        cmd_stamp_ = std::chrono::steady_clock::now();
+        cmd_received_ = true;
+      },
+      cmd_options);
 
   control_timer_ = create_wall_timer(
       std::chrono::duration<double>(kControlPeriodS),
@@ -569,7 +590,29 @@ void MockRobotNode::handleMotionAccepted(
   motion_.begin(goal_handle); // 句柄与相位同时改变（理由同 handleNavAccepted）
 }
 
+void MockRobotNode::cmdVelTick() {
+  std::lock_guard<std::mutex> lock(mutex_);
+
+  const bool stale =
+      !cmd_received_ ||
+      (std::chrono::steady_clock::now() - cmd_stamp_) >
+          std::chrono::duration<double>(kCmdVelTimeoutS);
+  const double linear = stale ? 0.0 : cmd_linear_;
+  const double angular = stale ? 0.0 : cmd_angular_;
+  if (linear == 0.0 && angular == 0.0) {
+    return;
+  }
+
+  // 差速底盘：先转向，再沿**转完之后**的车头方向前进一个周期的行程。
+  pose_.yaw = normalizeAngle(pose_.yaw + angular * kControlPeriodS);
+  pose_.x += linear * kControlPeriodS * std::cos(pose_.yaw);
+  pose_.y += linear * kControlPeriodS * std::sin(pose_.yaw);
+}
+
 void MockRobotNode::controlTick() {
+  // cmdVelTick 和 navTick 都能改位姿 —— 接 Nav2 时用前者，用本节点的导航服务端时用后者，
+  // 不要同时驱动。
+  cmdVelTick();
   navTick();      // 先推进导航，
   motionTick();   // 再推进关节运动，
   publishJoints();

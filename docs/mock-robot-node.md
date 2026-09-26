@@ -108,6 +108,17 @@
 
 **它不拿的**：`Robot`、`StatusAPI`、`NavigationAPI`、`MotionAPI`、`PerceptionAPI`、`ActionHandle` —— 全是客户端。
 
+#### 它**多听**了一样东西：`cmd_vel`
+
+mock 订阅 `cmd_vel`（`geometry_msgs/Twist`），按它推进位姿 —— 这样 **Nav2** 这类"出口就是 `cmd_vel`"的导航栈可以直接驱动它。
+
+**但它不属于 SDK 契约**（客户从不发 `cmd_vel`）—— 它是**机器人内部的总线**。所以：
+
+- 话题名由 mock **自己的参数** `cmd_vel_topic` 决定，**不进 `RobotConfig`**
+- 这正是 §7.1 那条判据的应用：*换掉后端之后这个配置还有意义吗？* —— 对客户没有，所以不进契约
+
+⚠️ 于是 mock 的位姿有**两个可能的驱动来源**：本节点的导航服务端（`navTick`）和 `cmd_vel`（`cmdVelTick`）。**同时用会互相打架**，接 Nav2 时只用后者。
+
 **为什么 SDK 有层、mock 没有层 —— 这是有意的**：
 
 | | 它的对面是谁 | 所以 |
@@ -252,6 +263,11 @@ if (nav_.running()) {
 | **状态回路** | **每 100 ms**（定时器） | 推进电量/运行时间；发布状态话题 |
 | **动作回调** | 客户发目标 / 取消时（**时刻不定**） | 决定收不收；写意图；投信箱 |
 | **服务回调** | 客户查询时（**时刻不定**） | **只读**，组装应答 |
+| **底盘命令** | 收到 `cmd_vel` 时（**时刻不定**） | 只记下速度和时间戳；真正移动仍在控制回路上 |
+
+> **"三条车道"现在其实是四条** —— 最后一条（`cmd_vel`）是第 27a 轮加的，
+> 为的是让 Nav2 这类"出口是 `cmd_vel`"的导航栈能驱动本模拟器（§1.4）。
+> 它的回调和其它回调一样：**只写意图（速度），不直接改位姿** ✅
 
 ### 3.2 职责划分（一句话 + 一张表）
 
@@ -261,7 +277,7 @@ if (nav_.running()) {
 
 | 字段 | 谁**写** | 谁**读** |
 |---|---|---|
-| `pose_`（机器人在哪） | **`navTick`** ← 控制回路 | `makeNavFeedback`、`publishFrames` |
+| `pose_`（机器人在哪） | **`navTick`** 或 **`cmdVelTick`** ← 都跑在控制回路上（**不同时用**，见 §1.4） | `makeNavFeedback`、`publishFrames`、传感器 |
 | `joint_positions_` | **`motionTick`** ← 控制回路 | `makeMotionFeedback`、`publishJoints`、状态服务 |
 | `battery_` / `charging_` / `uptime_s_` | **`statusTick`** ← 状态回路 | `makeStatus` |
 | `nav_` 槽位 / `nav_target_` / `nav_max_speed_` | **`handleNavGoal` / `handleNavCancel` / `handleNavAccepted`** ← 动作车道 | **`navTick`**（读并消费） |
@@ -270,9 +286,12 @@ if (nav_.running()) {
 
 > **构造期例外**：`joint_names_` / `joint_positions_` 在构造函数里初始化（`ensureJoint()` 可能追加一个夹爪关节），但**构造完成后就不再变**，所以它们不在"谁写谁读"的竞争范围内。
 
-**看这张表的结构**：左边两列的"写者"**从不重叠** —— 真值只有定时器写，意图只有回调写。这不是巧合，是设计。
+**看这张表的结构**：左边两列的"写者"**几乎不重叠** —— 真值由那两个定时器写，意图由回调写。唯一的例外是 `pose_`：它有两个写者（`navTick` / `cmdVelTick`），代表**两种互斥的驱动方式**，不是两处各自维护同一份事实。
 
-**【量】这张表是按 §3.8 的方法 grep 验证过的**（写这份文档时跑的）：`pose_` 全文**只有一处赋值**，就在 `navTick` 里；`joint_positions_` 的赋值全在 `motionTick` 里。
+**【量】这张表是按 §3.8 的方法 grep 验证过的**（写这份文档时跑的）：`joint_positions_` 的赋值全在 `motionTick` 里；`pose_` 的赋值只出现在**两个函数**里 —— `navTick` 和 `cmdVelTick`（其余出现全是读），而这两个函数**不同时用**。
+
+> ⚠️ **这条曾经是错的**：早先这里写的是"`pose_` 全文只有一处赋值"，而那用的是 `grep "pose_ ="` —— 它匹配不到 `pose_.x +=` / `pose_.yaw =`，是个**不会失败**的检查（`navTick` 里其实一直有 4 处赋值）。
+> **一个不会失败的"验证"，比没有验证更糟** —— 它会让你把它标成【量】。
 
 还有一条同样重要的（**编译器替你保证**）：
 
@@ -388,8 +407,10 @@ MoveToJointPositions::Feedback makeMotionFeedback(std::lock_guard<std::mutex>&) 
 划分是否还成立，两个 `grep` 就能验：
 
 ```bash
-# ① 真值 pose_ 应该只在 navTick 里被赋值
-grep -n "pose_ =" ws/src/robot_sdk_sim/src/mock_robot_node.cpp
+# ① 真值 pose_ 只应由 navTick / cmdVelTick 两个函数写（两者不同时用）。
+#    注意模式要写成 "pose_(\.[a-z]+)? *(\+=|-=|=)" ——
+#    只写 "pose_ =" 会漏掉 pose_.x += / pose_.yaw = 这类，那是个**不会失败**的检查。
+grep -nE "pose_(\.[a-z]+)? *(\+=|-=|=)" ws/src/robot_sdk_sim/src/mock_robot_node.cpp
 
 # ② 动作状态只应经由槽位
 #    （reserve / begin / finish / cancel_requested / feedback_divider）

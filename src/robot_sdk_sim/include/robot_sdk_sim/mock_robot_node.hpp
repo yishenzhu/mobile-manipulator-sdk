@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include <geometry_msgs/msg/twist.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
 #include <sensor_msgs/msg/camera_info.hpp>
@@ -49,6 +50,10 @@ class MockRobotNode : public rclcpp::Node {
 
   void controlTick();
   void statusTick();
+
+  /// 按最后收到的 `cmd_vel` 推进位姿 —— 跑在 50 Hz 控制回路上。
+  /// 有了它，Nav2 这类"出口是 cmd_vel"的导航栈就能直接驱动本模拟器。
+  void cmdVelTick();
 
   /// 推进导航 —— 跑在 50 Hz 控制回路上。
   /// 锁内只碰数据；`publish_feedback` / `succeed` / `canceled` 全在锁外调用（笔记 §7.8）。
@@ -131,6 +136,9 @@ class MockRobotNode : public rclcpp::Node {
   /// 导航动作服务端的组。**故意与 `timer_group_` 相反（可重入）**：
   /// 目标/取消可以在控制回路跑着的时候到达 —— 两条车道真的并发。
   rclcpp::CallbackGroup::SharedPtr action_group_;
+  /// 底盘命令的组，独立于其它车道。话题名由 mock 自己的参数 `cmd_vel_topic` 决定
+  /// （它不属于 SDK 契约 —— 客户从不发 cmd_vel）。
+  rclcpp::CallbackGroup::SharedPtr cmd_group_;
 
   rclcpp::Publisher<RobotStatus>::SharedPtr status_pub_;
   rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr joint_pub_;
@@ -149,6 +157,7 @@ class MockRobotNode : public rclcpp::Node {
   rclcpp::Service<GetRobotStatus>::SharedPtr status_service_;
   rclcpp_action::Server<NavigateToPose>::SharedPtr nav_server_;
   rclcpp_action::Server<MoveToJointPositions>::SharedPtr motion_server_;
+  rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_sub_;
 
   /// 保护下面这些"机器人状态"成员：控制定时器写、状态/反馈读。
   std::mutex mutex_;
@@ -177,6 +186,15 @@ class MockRobotNode : public rclcpp::Node {
   double battery_{100.0};
   bool charging_{false};
   double uptime_s_{0.0};
+
+  // ── 底盘命令（同样受 mutex_ 保护）──
+  /// 最近一次 cmd_vel 的线速度 / 角速度，以及它是什么时候收到的。
+  /// 收不到新命令超过一段时间就当停车 —— 真底盘也是这个行为。
+  /// 时间用**单调时钟**：只问"距上次过了多久"，与系统时间/仿真时间无关。
+  double cmd_linear_{0.0};
+  double cmd_angular_{0.0};
+  bool cmd_received_{false};
+  std::chrono::steady_clock::time_point cmd_stamp_;
 
   /// 传感器降频用：控制回路 50 Hz，传感器只要 10 Hz。
   /// 它和 `last_yaw_` 其实只有控制回路这一条车道会碰（严格说不需要锁），
