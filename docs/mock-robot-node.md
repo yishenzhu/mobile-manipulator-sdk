@@ -701,6 +701,7 @@ ws/src/robot_sdk_sim/
 └── launch/                     ← 命名空间/参数（相对名 + 参数驱动的入口）
 
 ws/src/robot_sdk_core/          ← 契约（config.hpp 定义上面所有名字）
+ws/src/robot_sdk_examples/      ← **客户代码长什么样**：hello_robot / demo_navigation
 ws/学习笔记.md                   ← 逐次踩坑的历史与推导过程
 ws/docs/mock-robot-node.md      ← 本文件
 ```
