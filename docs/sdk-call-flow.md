@@ -295,6 +295,26 @@ config.navigation.action_name = "sdk/navigate_to_pose";   // 就这一行
 
 这就是"接口解耦"的具体含义：**换掉导航栈，客户代码不动。**
 
+> 这层适配器现在就在 `ws/src/robot_sdk_bridge/`（`nav2_adapter`）。
+> 它跑起来要和下游同时起：
+> ```bash
+> ros2 run robot_sdk_bridge nav2_adapter      # 起适配器
+> ros2 run robot_sdk_examples demo_navigation sdk/navigate_to_pose   # 客户打适配器
+> ```
+
+**适配器上的"后端特有旋钮"** —— SDK 契约里**没有**这些东西（它们只对某个后端有意义），
+所以只能在这一层调：
+
+| 旋钮 | 是什么 | 运行时能改吗 |
+|---|---|---|
+| `behavior_tree` | Nav2 用哪棵"出事怎么办"的流程图（XML 路径，空 = 用默认） | ✅ **每次发目标时读** —— 改了对**下一个**目标生效 |
+| `default_frame` | 目标没写 frame 时按哪个帧处理 | ❌ 启动时定 |
+| `sdk_action_name` / `nav2_action_name` | 两侧的动作名 | ❌ 启动时定（server/client 已经建好了）|
+
+> **判据**：一个参数如果只在启动时读，就必须**说清它是启动时定的** ——
+> 否则就成了"改了不生效"的死配置。`behavior_tree` 原本是这种（只在构造时读一次），
+> 现在改成每次发目标时读。（反向的例子：SDK 的 `max_acceleration` **声明了但没有任何后端兑现**。）
+
 ---
 
 ## 4. `spin()` / 执行器 / 线程池（最容易搞错的部分）

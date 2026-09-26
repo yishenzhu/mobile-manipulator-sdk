@@ -6,15 +6,14 @@
 
 #include <rclcpp_action/rclcpp_action.hpp>
 
-namespace robot_sdk::sim {
+namespace robot_sdk {
 
-/// 一个动作服务端的**槽位**。本模拟器同时只跑一个同类目标，所以每个 action
-/// 只要一个槽位 —— 它把"这个 action 现在处于什么状态"收成**一个值**。
+/// 一个动作服务端的**槽位**：把一个目标的生命周期收成**一个值**。
+/// 同时只服务一个同类目标的服务端，每个动作一个槽位。
 ///
 /// **为什么不是三个 bool**（`reserved` / `active` / `cancel_requested`）：
 /// 三个 bool 有 8 种组合，只有 4 种合法 —— 而 `reserved && active` 正是
-/// 非法组合之一，上一轮的悬空句柄 bug 就住在那里。改成三态枚举后，
-/// 非法组合**根本无法表达**。
+/// 非法组合之一。改成三态枚举后，非法组合**根本无法表达**。
 template <typename Action>
 struct ActionSlot {
   enum class Phase {
@@ -29,13 +28,10 @@ struct ActionSlot {
   /// 目标已被接受时它**还是空的**，此时拿它去回调框架就是空指针解引用。
   std::shared_ptr<rclcpp_action::ServerGoalHandle<Action>> handle;
 
-  /// **一位信箱**，不是状态：取消回调（框架线程）投递，控制回路取走。
+  /// **一位信箱**，不是状态：取消回调（框架线程）投递，服务端的执行侧取走。
   /// 它**任何相位都可能到达**（连 `kIdle` 都可能 —— 取消回调里 `is_active()`
-  /// 与这里加锁之间目标可能已结束，见 学习笔记.md §7.8），所以不能并进 `Phase`。
+  /// 与这里加锁之间目标可能已结束），所以不能并进 `Phase`。
   bool cancel_requested{false};
-
-  /// 反馈降频用：每 N 个控制周期发一条反馈。
-  int feedback_divider{0};
 
   bool busy() const { return phase != Phase::kIdle; }
   bool running() const { return phase == Phase::kRunning; }
@@ -43,8 +39,7 @@ struct ActionSlot {
   /// 占位：挡住并发到达的第二个目标。**不置 `kRunning`** —— 句柄还没到。
   void reserve() {
     phase = Phase::kReserved;
-    cancel_requested = false; // 残留的取消请求不能影响新目标（笔记 §7.8）
-    feedback_divider = 0;
+    cancel_requested = false; // 残留的取消请求不能影响新目标
   }
 
   /// 句柄到位。与相位**在同一个临界区里**改变，于是
@@ -60,15 +55,12 @@ struct ActionSlot {
   }
 };
 
-/// 动作服务端的**每拍骨架**。
+/// 动作服务端的**每拍骨架** —— 给"自己按时间推进"的服务端用
+/// （模拟器、本体驱动那类）。转发的桥接器用不上它：它们没有本地状态要推进。
 ///
-/// 两个 `*Tick()` 本来只差中间那段"推进"，其余（局部变量、加锁、空转、
-/// 取消分支、终态回调、反馈发布）**逐字相同** —— 那就只写一遍。
-///
-/// `advance` 在**锁内**被调用，所以它拿得到凭证 `lock`（同 `makeStatus`）。
-/// 它只需回答"这一拍做了什么"：**返回非空 result 即表示完成** ——
-/// 用"有没有结果"代替一个 `bool done` 出参，少一个能写错的开关。
-///
+/// 骨架管：加锁 / 空转 / 取消 / 终态回调 / 反馈发布。
+/// `advance` 在**锁内**被调用，参数 `lock` 是凭证（同 `makeStatus`）。
+/// 它只需回答"这一拍做了什么"：**返回非空 result 即表示完成**。
 /// 框架调用（`succeed` / `canceled` / `publish_feedback`）全在**锁外**。
 template <typename Action, typename Advance>
 void tickAction(std::mutex &mutex, ActionSlot<Action> &slot, Advance &&advance) {
@@ -113,4 +105,4 @@ void tickAction(std::mutex &mutex, ActionSlot<Action> &slot, Advance &&advance) 
   }
 }
 
-} // namespace robot_sdk::sim
+} // namespace robot_sdk

@@ -696,21 +696,23 @@ constexpr double kDefaultMaxSpeedMps = 0.5;
 ```
 ws/src/robot_sdk_sim/
 ├── include/robot_sdk_sim/
-│   ├── mock_robot_node.hpp     ← 类定义 + 锁纪律的注释
-│   └── action_slot.hpp         ← ActionSlot（三态）+ tickAction（每拍骨架）
+│   └── mock_robot_node.hpp     ← 类定义 + 锁纪律的注释
 ├── src/
 │   ├── mock_robot_node.cpp     ← 全部实现
 │   └── mock_robot_main.cpp     ← MultiThreadedExecutor（并发设计的入口）
 └── launch/                     ← 命名空间/参数（相对名 + 参数驱动的入口）
 
 ws/src/robot_sdk_core/          ← 契约（config.hpp 定义上面所有名字）
+│   └── detail/action_slot.hpp  ← **动作服务端的通用件**：ActionSlot（三态）+ tickAction
+│                                  （mock 与适配层共用，所以它不住在 sim 里）
 ws/src/robot_sdk_examples/      ← **客户代码长什么样**：hello_robot / demo_navigation
+ws/src/robot_sdk_bridge/        ← 适配层：SDK 动作 → Nav2 动作（nav2_adapter）
 ws/学习笔记.md                   ← 逐次踩坑的历史与推导过程
 ws/docs/mock-robot-node.md      ← 本文件（mock 的内部设计）
 ws/docs/sdk-call-flow.md        ← 姊妹文档（SDK 调用流程 + 与手写 ROS 2 对比，偏入门）
 ```
 
-**读代码的建议顺序**：`config.hpp`（契约是什么）→ **`mock_robot_main.cpp`（§3 的几条车道）** → `mock_robot_node.hpp`（类结构与纪律）→ `action_slot.hpp`（动作骨架）→ `mock_robot_node.cpp`。
+**读代码的建议顺序**：`config.hpp`（契约是什么）→ **`mock_robot_main.cpp`（§3 的几条车道）** → `mock_robot_node.hpp`（类结构与纪律）→ `robot_sdk/detail/action_slot.hpp`（动作骨架）→ `mock_robot_node.cpp`。
 
 ---
 

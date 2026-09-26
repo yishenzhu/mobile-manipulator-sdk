@@ -23,8 +23,8 @@
 #include <robot_sdk_interfaces/srv/get_robot_status.hpp>
 
 #include "robot_sdk/config.hpp"
+#include "robot_sdk/detail/action_slot.hpp"
 #include "robot_sdk/types.hpp"
-#include "robot_sdk_sim/action_slot.hpp"
 
 namespace robot_sdk::sim {
 
@@ -155,11 +155,13 @@ class MockRobotNode : public rclcpp::Node {
   Pose2D pose_{};
 
   // ── 导航状态（同样受 mutex_ 保护）──
-  /// 动作状态收在**一个槽位**里（三态 + 句柄 + 一位取消信箱 + 反馈降频）。
+  /// 动作状态收在**一个槽位**里（三态 + 句柄 + 一位取消信箱）。
   /// 以前这里是 5 个散装成员、其中 3 个 bool —— 见 action_slot.hpp 的说明。
   ActionSlot<NavigateToPose> nav_;
   Pose2D nav_target_{};
   double nav_max_speed_{0.0};
+  /// 反馈降频用：每 N 个控制周期发一条反馈。
+  int nav_feedback_divider_{0};
 
   // ── 关节运动状态（同样受 mutex_ 保护）──
   ActionSlot<MoveToJointPositions> motion_;
@@ -168,6 +170,8 @@ class MockRobotNode : public rclcpp::Node {
   double motion_max_velocity_{0.0};
   /// 起始最大误差 —— `completion_percentage` 的分母。
   double motion_initial_error_{0.0};
+  /// 反馈降频用：每 N 个控制周期发一条反馈。
+  int motion_feedback_divider_{0};
   std::vector<std::string> joint_names_;
   std::vector<double> joint_positions_;
   double battery_{100.0};

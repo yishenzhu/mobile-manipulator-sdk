@@ -349,8 +349,8 @@ void MockRobotNode::navTick() {
         pose_.y += step * (nav_target_.y - pose_.y) / remaining;
         pose_.yaw = std::atan2(nav_target_.y - pose_.y, nav_target_.x - pose_.x);
 
-        if (++nav_.feedback_divider >= kFeedbackEveryNTicks) {
-          nav_.feedback_divider = 0;
+        if (++nav_feedback_divider_ >= kFeedbackEveryNTicks) {
+          nav_feedback_divider_ = 0;
           feedback = std::make_shared<NavigateToPose::Feedback>(makeNavFeedback(lock));
         }
       });
@@ -377,6 +377,7 @@ MockRobotNode::handleNavGoal(const rclcpp_action::GoalUUID & /*uuid*/,
       // 而 kRunning 一旦成立，navTick 就会拿句柄去回调框架，那个窗口里它还是空的。
       // 它顺手清掉残留的取消请求（与取消回调存在竞态，见 学习笔记.md §7.8）。
       nav_.reserve();
+      nav_feedback_divider_ = 0;
       nav_target_ = toPose2D(goal->target_pose);
       nav_max_speed_ =
           goal->max_speed > 0.0f ? goal->max_speed : kDefaultMaxSpeedMps;
@@ -486,9 +487,9 @@ void MockRobotNode::motionTick() {
           result->success = true;
           result->final_position_error = static_cast<float>(worst);
           result->message = "reached target";
-        } else if (++motion_.feedback_divider >= kFeedbackEveryNTicks) {
+        } else if (++motion_feedback_divider_ >= kFeedbackEveryNTicks) {
           // 反馈不必跟控制同频（同导航）：50 Hz 控制、10 Hz 反馈。
-          motion_.feedback_divider = 0;
+          motion_feedback_divider_ = 0;
           feedback =
               std::make_shared<MoveToJointPositions::Feedback>(makeMotionFeedback(lock));
         }
@@ -527,9 +528,9 @@ rclcpp_action::GoalResponse MockRobotNode::handleMotionGoal(
         motion_target_ = std::move(target);
         motion_max_velocity_ =
             goal->max_velocity > 0.0f ? goal->max_velocity : kDefaultJointVelocity;
-        // reserve() 只置"占位"相位（理由同 handleNavGoal），
-        // 并顺手清掉残留的取消请求、复位反馈降频。
+        // reserve() 只置"占位"相位（理由同 handleNavGoal），并清掉残留的取消请求。
         motion_.reserve();
+        motion_feedback_divider_ = 0;
         // 起始最大误差 —— completion_percentage 的分母。
         motion_initial_error_ = 0.0;
         for (std::size_t i = 0; i < motion_target_.size(); ++i) {
