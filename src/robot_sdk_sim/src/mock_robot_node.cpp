@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <limits>
 #include <string>
 #include <utility>
@@ -113,6 +114,16 @@ double cameraFocalLength() {
   return (kDepthWidth / 2.0) / std::tan(kCameraHfovRad / 2.0);
 }
 
+/// 读深度图的第 `index` 个像素（encoding = "32FC1"，每像素一个 float）。
+///
+/// 用 `memcpy` 而不是把 `data` 强转成 `float*`：后者依赖"vector<uint8_t> 的缓冲区
+/// 满足 float 对齐"这个实践中成立、标准里不保证的假设。
+float readDepthPixel(const sensor_msgs::msg::Image &image, std::size_t index) {
+  float value = 0.0F;
+  std::memcpy(&value, image.data.data() + index * sizeof(float), sizeof(float));
+  return value;
+}
+
 /// 造一个 TF 消息。`parent -> child`，带平移和 **RPY**。
 /// 需要 RPY 而不是单个偏航的场合只有一处：相机的**光学帧**（见构造函数）。
 geometry_msgs::msg::TransformStamped makeTransformRpy(
@@ -181,6 +192,8 @@ MockRobotNode::MockRobotNode(const rclcpp::NodeOptions &options)
       config_.perception.camera_info_topic, sensor_qos);
   depth_pub_ = create_publisher<sensor_msgs::msg::Image>(
       config_.perception.depth_image_topic, sensor_qos);
+  point_cloud_pub_ = create_publisher<sensor_msgs::msg::PointCloud2>(
+      config_.perception.point_cloud_topic, sensor_qos);
 
   tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
   static_tf_broadcaster_ =
@@ -654,6 +667,9 @@ void MockRobotNode::publishSensors() {
   imu_pub_->publish(imu);
   camera_info_pub_->publish(camera_info);
   depth_pub_->publish(depth);
+  // 点云是**从深度图算出来的**，所以这里放在锁外、直接吃已经算好的那一张 ——
+  // 不会把同一批射线再打一遍，也不需要再碰共享状态。
+  point_cloud_pub_->publish(makePointCloud(depth));
 }
 
 sensor_msgs::msg::LaserScan
@@ -790,6 +806,54 @@ MockRobotNode::makeDepthImage(std::lock_guard<std::mutex> & /*lock*/,
                     reinterpret_cast<const uint8_t *>(meters.data()) +
                         meters.size() * sizeof(float));
   return image;
+}
+
+sensor_msgs::msg::PointCloud2
+MockRobotNode::makePointCloud(const sensor_msgs::msg::Image &depth) const {
+  // 从深度图**反投影**：每个像素 (u, v) + 它的 z 深度 → 光学系里的一个三维点。
+  //   x = (u - cx) * z / fx
+  //   y = (v - cy) * z / fy      （fy = fx，像素是正方形的）
+  //   z = z 深度本身
+  // **信息量和深度图完全一样**，只是排布从"表格"变成了"散点"。
+  const double fx = cameraFocalLength();
+  const double cx = kDepthWidth / 2.0;
+  const double cy = kDepthHeight / 2.0;
+
+  sensor_msgs::msg::PointCloud2 cloud;
+  cloud.header.stamp = depth.header.stamp;
+  cloud.header.frame_id = camera_optical_frame_; // 点就在光学系里，不用再转
+  // **有组织**的点云：行列结构和深度图一致（真实 depth_image_proc 也是这么发的）。
+  cloud.height = kDepthHeight;
+  cloud.width = kDepthWidth;
+  cloud.is_bigendian = false;
+  // 房间是封闭的 ⇒ 每个像素都有有效深度，没有 NaN。
+  cloud.is_dense = true;
+  cloud.point_step = 3 * sizeof(float);
+  cloud.row_step = cloud.point_step * cloud.width;
+  cloud.fields.resize(3);
+  const char *axis_names[3] = {"x", "y", "z"};
+  for (std::size_t i = 0; i < 3; ++i) {
+    cloud.fields[i].name = axis_names[i];
+    cloud.fields[i].offset = static_cast<uint32_t>(i * sizeof(float));
+    cloud.fields[i].datatype = sensor_msgs::msg::PointField::FLOAT32;
+    cloud.fields[i].count = 1;
+  }
+
+  // 先在连续内存里拼好，再整体拷进 data —— 和深度图同一套做法，避免对齐假设。
+  std::vector<float> xyz(static_cast<std::size_t>(kDepthWidth) * kDepthHeight * 3);
+  for (int v = 0; v < kDepthHeight; ++v) {
+    for (int u = 0; u < kDepthWidth; ++u) {
+      const std::size_t pixel = static_cast<std::size_t>(v) * kDepthWidth + u;
+      const double z = readDepthPixel(depth, pixel);
+      xyz[pixel * 3 + 0] = static_cast<float>((u - cx) * z / fx);
+      xyz[pixel * 3 + 1] = static_cast<float>((v - cy) * z / fx);
+      xyz[pixel * 3 + 2] = static_cast<float>(z);
+    }
+  }
+  cloud.data.assign(reinterpret_cast<const uint8_t *>(xyz.data()),
+                    reinterpret_cast<const uint8_t *>(xyz.data()) +
+                        xyz.size() * sizeof(float));
+  return cloud;
 }
 
 } // namespace robot_sdk::sim

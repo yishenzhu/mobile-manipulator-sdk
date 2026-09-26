@@ -13,6 +13,7 @@
 #include <sensor_msgs/msg/imu.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
 #include <sensor_msgs/msg/laser_scan.hpp>
+#include <sensor_msgs/msg/point_cloud2.hpp>
 #include <tf2_ros/static_transform_broadcaster.h>
 #include <tf2_ros/transform_broadcaster.h>
 
@@ -100,6 +101,9 @@ class MockRobotNode : public rclcpp::Node {
   /// 深度图要逐像素射线求交，**读 `pose_`** —— 需要凭证。
   sensor_msgs::msg::Image makeDepthImage(std::lock_guard<std::mutex>& lock,
                                          const rclcpp::Time& stamp) const;
+  /// 点云**从深度图反投影**得到（信息量相同，只是排布从"表格"变成"散点"）。
+  /// 它只吃已经算好的深度图、不读任何共享状态 —— 所以不需要凭证，也不收 lock。
+  sensor_msgs::msg::PointCloud2 makePointCloud(const sensor_msgs::msg::Image& depth) const;
 
   /// 把"此刻的状态"拼成一条 RobotStatus。
   ///
@@ -134,6 +138,7 @@ class MockRobotNode : public rclcpp::Node {
   rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr imu_pub_;
   rclcpp::Publisher<sensor_msgs::msg::CameraInfo>::SharedPtr camera_info_pub_;
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr depth_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr point_cloud_pub_;
 
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
   std::unique_ptr<tf2_ros::StaticTransformBroadcaster> static_tf_broadcaster_;
