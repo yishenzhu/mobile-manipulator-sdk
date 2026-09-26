@@ -41,36 +41,83 @@ constexpr int kSensorEveryNTicks = 5;
 constexpr int kScanRays = 360;
 constexpr double kScanRangeMin = 0.05;
 constexpr double kScanRangeMax = 10.0;
-// 激光挂载点相对 base 的 x 偏移 —— **必须与构造函数里那条静态 TF 一致**。
+// 激光挂载点相对 base 的偏移 —— **必须与构造函数里那条静态 TF 一致**。
 constexpr double kLaserOffsetX = 0.1;
+constexpr double kLaserOffsetZ = 0.2; // 激光是水平的，z 不参与计算；写对是为了诚实
 
-// 模拟机器人的"世界"：一个矩形房间，**四面墙就是它唯一的障碍物**。
+// 模拟机器人的"世界"：一个长方体房间，**六面就是它唯一的障碍物**。
 // 它没有障碍物模型（见 docs/mock-robot-node.md §1.3），所以扫描得在这里"编"出来。
 constexpr double kRoomHalfWidth = 5.0;  // x ∈ [-5, 5]
 constexpr double kRoomHalfHeight = 4.0; // y ∈ [-4, 4]
+// 房间是有高度的：地面 z=0、天花板 z=2.5。
+// 2D 激光打不到它们（射线是水平的），但深度相机能 —— 所以相机需要三维的房间。
+constexpr double kRoomFloorZ = 0.0;
+constexpr double kRoomCeilingZ = 2.5;
 
-/// 从 (px, py) 沿角度 a 射出的光线，打到矩形房间墙上的距离。
+// 深度相机：尺寸小就够 —— 它是让客户"有东西可读"，不是图像质量展示。
+constexpr int kDepthWidth = 64;
+constexpr int kDepthHeight = 48;
+constexpr double kCameraHfovRad = M_PI / 3.0; // 水平视场 60°
+// 相机安装点（**必须与构造函数里那条静态 TF 一致**）：base 前 0.2、上 0.3。
+constexpr double kCameraOffsetX = 0.2;
+constexpr double kCameraOffsetZ = 0.3;
+
+/// 从 (ox,oy,oz) 沿**单位**方向 (dx,dy,dz) 射出，打在长方体房间上的距离。
+/// 打不到返回 inf。
 ///
-/// 分别求与 x = ±半宽、y = ±半高 四个面的交点，取最近的那个。
-double rayToWall(double px, double py, double a) {
-  const double dx = std::cos(a);
-  const double dy = std::sin(a);
-  // 平行于某个轴时（dx 或 dy 为 0）那个面永远打不到 —— 用 inf 表示。
-  const double tx = dx > 0.0 ? (kRoomHalfWidth - px) / dx
-                             : (dx < 0.0 ? (-kRoomHalfWidth - px) / dx
-                                         : std::numeric_limits<double>::infinity());
-  const double ty = dy > 0.0 ? (kRoomHalfHeight - py) / dy
-                             : (dy < 0.0 ? (-kRoomHalfHeight - py) / dy
-                                         : std::numeric_limits<double>::infinity());
-  return std::min(tx, ty);
+/// 这是标准的 **slab 法**：把长方体看成三对平行板，每对给出一个参数区间
+/// `[t1, t2]`，三者求交 —— 交出来的下界就是"进入盒子"的距离。
+///
+/// **激光和相机共用它。** 激光的 dz ≡ 0，所以地面/天花板那两项永远命中不了，
+/// 结果和"只看四面墙"完全一样；但共用一份房间模型意味着**不会改了一个忘另一个**。
+double rayToBox(double ox, double oy, double oz, double dx, double dy, double dz) {
+  const double origin[3] = {ox, oy, oz};
+  const double dir[3] = {dx, dy, dz};
+  const double lo[3] = {-kRoomHalfWidth, -kRoomHalfHeight, kRoomFloorZ};
+  const double hi[3] = {kRoomHalfWidth, kRoomHalfHeight, kRoomCeilingZ};
+
+  double t_enter = -std::numeric_limits<double>::infinity();
+  double t_exit = std::numeric_limits<double>::infinity();
+
+  for (int axis = 0; axis < 3; ++axis) {
+    if (std::abs(dir[axis]) < 1e-12) {
+      // 平行于这对板：不在两板之间就永远打不到。
+      if (origin[axis] < lo[axis] || origin[axis] > hi[axis]) {
+        return std::numeric_limits<double>::infinity();
+      }
+      continue;
+    }
+    double t1 = (lo[axis] - origin[axis]) / dir[axis];
+    double t2 = (hi[axis] - origin[axis]) / dir[axis];
+    if (t1 > t2) {
+      std::swap(t1, t2); // 方向为负时近/远会颠倒
+    }
+    t_enter = std::max(t_enter, t1);
+    t_exit = std::min(t_exit, t2);
+  }
+
+  // 区间空了（或整个盒子在身后）= 这条射线打不到墙。
+  if (t_enter > t_exit || t_exit < 0.0) {
+    return std::numeric_limits<double>::infinity();
+  }
+  // ⚠️ 这里是关键：**相机在房间内部**，所以 t_enter 是负的（"入口在身后"），
+  //    真正的墙是**出口** t_exit。
+  //    一开始把 t_enter 初始成 0 是错的 —— max(0, 负数) 会把负号吃掉，
+  //    于是永远返回 0（一整张深度图全是 0，而且不报错）。
+  return t_enter > 0.0 ? t_enter : t_exit;
 }
 
-/// 造一个 TF 消息。`parent -> child`，带平移和偏航。
-geometry_msgs::msg::TransformStamped makeTransform(const rclcpp::Time &stamp,
-                                                   const std::string &parent,
-                                                   const std::string &child,
-                                                   double x, double y, double z,
-                                                   double yaw) {
+/// 深度相机的焦距（像素）—— 由"水平视场 60°"推出来，而不是随手写个数。
+/// 像素是正方形的，所以 fx = fy。
+double cameraFocalLength() {
+  return (kDepthWidth / 2.0) / std::tan(kCameraHfovRad / 2.0);
+}
+
+/// 造一个 TF 消息。`parent -> child`，带平移和 **RPY**。
+/// 需要 RPY 而不是单个偏航的场合只有一处：相机的**光学帧**（见构造函数）。
+geometry_msgs::msg::TransformStamped makeTransformRpy(
+    const rclcpp::Time &stamp, const std::string &parent, const std::string &child,
+    double x, double y, double z, double roll, double pitch, double yaw) {
   geometry_msgs::msg::TransformStamped tf;
   tf.header.stamp = stamp;
   tf.header.frame_id = parent;
@@ -78,8 +125,22 @@ geometry_msgs::msg::TransformStamped makeTransform(const rclcpp::Time &stamp,
   tf.transform.translation.x = x;
   tf.transform.translation.y = y;
   tf.transform.translation.z = z;
-  tf.transform.rotation = quaternionFromYaw(yaw);
+
+  tf2::Quaternion q;
+  q.setRPY(roll, pitch, yaw);
+  tf.transform.rotation.x = q.x();
+  tf.transform.rotation.y = q.y();
+  tf.transform.rotation.z = q.z();
+  tf.transform.rotation.w = q.w();
   return tf;
+}
+
+/// 只要平移 + 偏航时的简写（绝大多数挂载点都只用得上这个）。
+geometry_msgs::msg::TransformStamped makeTransform(const rclcpp::Time &stamp,
+                                                   const std::string &parent,
+                                                   const std::string &child, double x,
+                                                   double y, double z, double yaw) {
+  return makeTransformRpy(stamp, parent, child, x, y, z, 0.0, 0.0, yaw);
 }
 
 } // namespace
@@ -116,6 +177,10 @@ MockRobotNode::MockRobotNode(const rclcpp::NodeOptions &options)
       config_.perception.laser_scan_topic, sensor_qos);
   imu_pub_ = create_publisher<sensor_msgs::msg::Imu>(config_.perception.imu_topic,
                                                      sensor_qos);
+  camera_info_pub_ = create_publisher<sensor_msgs::msg::CameraInfo>(
+      config_.perception.camera_info_topic, sensor_qos);
+  depth_pub_ = create_publisher<sensor_msgs::msg::Image>(
+      config_.perception.depth_image_topic, sensor_qos);
 
   tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
   static_tf_broadcaster_ =
@@ -130,6 +195,14 @@ MockRobotNode::MockRobotNode(const rclcpp::NodeOptions &options)
       makeTransform(stamp, base, imu_frame_, 0.0, 0.0, 0.1, 0.0));
   static_tf_broadcaster_->sendTransform(
       makeTransform(stamp, base, camera_frame_, 0.2, 0.0, 0.3, 0.0));
+
+  // 相机的**光学帧**：ROS 约定图像数据的坐标系是 z 朝前 / x 朝右 / y 朝下，
+  // 而 body 系是 x 前 / y 左 / z 上 —— 两者差一个固定旋转 RPY(-90°, 0, -90°)。
+  // 少广播这一帧，客户拿 TF 去投影深度图会得到**错误但看起来合理**的结果
+  // （这正是本项目最怕的那类 bug：不报错）。
+  static_tf_broadcaster_->sendTransform(makeTransformRpy(
+      stamp, camera_frame_, camera_optical_frame_, 0.0, 0.0, 0.0, -M_PI / 2.0, 0.0,
+      -M_PI / 2.0));
 
   // 状态查询服务：按需给一份"此刻"的状态快照。
   // 它跑在**独立的互斥组**里 —— 不跟 50 Hz 控制回路抢同一条车道。
@@ -548,9 +621,11 @@ void MockRobotNode::publishJoints() {
 void MockRobotNode::publishSensors() {
   sensor_msgs::msg::LaserScan scan;
   sensor_msgs::msg::Imu imu;
+  sensor_msgs::msg::CameraInfo camera_info;
+  sensor_msgs::msg::Image depth;
 
   {
-    // ── 锁内：降频判断 + 取数 + 组装（不碰发布）──
+    // ── 锁内：降频 + 组装（不碰发布）──
     std::lock_guard<std::mutex> lock(mutex_);
 
     // 降频判断其实**可以**放在锁外：`sensor_divider_` 只有控制回路这一条车道会碰
@@ -567,51 +642,154 @@ void MockRobotNode::publishSensors() {
     sensor_divider_ = 0;
 
     const auto stamp = now();
-
-    // ── 激光：从挂载点朝一圈方向射线，打到房间的墙上 ──
-    scan.header.stamp = stamp;
-    scan.header.frame_id = laser_frame_;
-    scan.angle_min = -M_PI;
-    scan.angle_max = M_PI;
-    scan.angle_increment = 2.0 * M_PI / kScanRays;
-    scan.range_min = kScanRangeMin;
-    scan.range_max = kScanRangeMax;
-    scan.scan_time = static_cast<float>(kControlPeriodS * kSensorEveryNTicks);
-
-    // 挂载点：相对 base 的偏移，随机器人朝向一起转。
-    const double laser_x = pose_.x + kLaserOffsetX * std::cos(pose_.yaw);
-    const double laser_y = pose_.y + kLaserOffsetX * std::sin(pose_.yaw);
-
-    scan.ranges.reserve(kScanRays);
-    for (int i = 0; i < kScanRays; ++i) {
-      // angle 是**激光坐标系**里的角 —— 机器人转了，世界角就跟着转。
-      const double angle = scan.angle_min + i * scan.angle_increment;
-      const double range = rayToWall(laser_x, laser_y, pose_.yaw + angle);
-      // 超出量程 = 没有回波。ROS 约定用 inf，不是 0、也不是 range_max。
-      scan.ranges.push_back(range <= kScanRangeMax
-                                ? static_cast<float>(std::max(range, kScanRangeMin))
-                                : std::numeric_limits<float>::infinity());
-    }
-
-    // ── IMU：朝向取真值；角速度只能由上一拍的偏航差得到，没有别的来源 ──
-    imu.header.stamp = stamp;
-    imu.header.frame_id = imu_frame_;
-    imu.orientation = quaternionFromYaw(pose_.yaw);
-    imu.angular_velocity.z =
-        angleDifference(pose_.yaw, last_yaw_) / (kControlPeriodS * kSensorEveryNTicks);
+    scan = makeScan(lock, stamp);
+    // 角速度要拿"上一拍"差分，所以先把旧值传进去，**再**更新它。
+    imu = makeImu(lock, stamp, last_yaw_);
     last_yaw_ = pose_.yaw;
-    // 静止时加速度计读到的是**支持力**，所以 z 是 +g 而不是 -g。
-    imu.linear_acceleration.z = 9.81;
-    // 协方差给个小值，不给 0：0 在 ROS 里表示"完全已知"，
-    // 下游滤波器会当特例处理（有的直接拿它做除法）。本模拟器无噪声，
-    // 但也没必要**假装**完全已知。
-    imu.orientation_covariance[0] = 1e-4;
-    imu.angular_velocity_covariance[0] = 1e-4;
-    imu.linear_acceleration_covariance[0] = 1e-4;
+    camera_info = makeCameraInfo(stamp);
+    depth = makeDepthImage(lock, stamp);
   } // ← 锁在这里放掉
 
   scan_pub_->publish(scan); // 锁外做 I/O
   imu_pub_->publish(imu);
+  camera_info_pub_->publish(camera_info);
+  depth_pub_->publish(depth);
+}
+
+sensor_msgs::msg::LaserScan
+MockRobotNode::makeScan(std::lock_guard<std::mutex> & /*lock*/,
+                        const rclcpp::Time &stamp) const {
+  // ── 激光：从挂载点朝一圈方向射线，打到房间的墙上 ──
+  sensor_msgs::msg::LaserScan scan;
+  scan.header.stamp = stamp;
+  scan.header.frame_id = laser_frame_;
+  scan.angle_min = -M_PI;
+  scan.angle_max = M_PI;
+  scan.angle_increment = 2.0 * M_PI / kScanRays;
+  scan.range_min = kScanRangeMin;
+  scan.range_max = kScanRangeMax;
+  scan.scan_time = static_cast<float>(kControlPeriodS * kSensorEveryNTicks);
+
+  // 挂载点：相对 base 的偏移，随机器人朝向一起转。
+  const double laser_x = pose_.x + kLaserOffsetX * std::cos(pose_.yaw);
+  const double laser_y = pose_.y + kLaserOffsetX * std::sin(pose_.yaw);
+
+  scan.ranges.reserve(kScanRays);
+  for (int i = 0; i < kScanRays; ++i) {
+    // angle 是**激光坐标系**里的角 —— 机器人转了，世界角就跟着转。
+    const double angle = scan.angle_min + i * scan.angle_increment;
+    const double world_angle = pose_.yaw + angle;
+    // 激光射线是**水平的**（dz = 0），所以地面/天花板那两项永远命中不了。
+    // 与相机共用同一个 `rayToBox` —— 一份房间模型，不会改了一个忘另一个。
+    const double range = rayToBox(laser_x, laser_y, kLaserOffsetZ,
+                                  std::cos(world_angle), std::sin(world_angle), 0.0);
+    // 超出量程 = 没有回波。ROS 约定用 inf，不是 0、也不是 range_max。
+    scan.ranges.push_back(range <= kScanRangeMax
+                              ? static_cast<float>(std::max(range, kScanRangeMin))
+                              : std::numeric_limits<float>::infinity());
+  }
+  return scan;
+}
+
+sensor_msgs::msg::Imu MockRobotNode::makeImu(std::lock_guard<std::mutex> & /*lock*/,
+                                             const rclcpp::Time &stamp,
+                                             double previous_yaw) const {
+  // ── IMU：朝向取真值；角速度只能由上一拍的偏航差得到，没有别的来源 ──
+  sensor_msgs::msg::Imu imu;
+  imu.header.stamp = stamp;
+  imu.header.frame_id = imu_frame_;
+  imu.orientation = quaternionFromYaw(pose_.yaw);
+  imu.angular_velocity.z =
+      angleDifference(pose_.yaw, previous_yaw) / (kControlPeriodS * kSensorEveryNTicks);
+  // 静止时加速度计读到的是**支持力**，所以 z 是 +g 而不是 -g。
+  imu.linear_acceleration.z = 9.81;
+  // 协方差给个小值，不给 0：0 在 ROS 里表示"完全已知"，
+  // 下游滤波器会当特例处理（有的直接拿它做除法）。本模拟器无噪声，
+  // 但也没必要**假装**完全已知。
+  imu.orientation_covariance[0] = 1e-4;
+  imu.angular_velocity_covariance[0] = 1e-4;
+  imu.linear_acceleration_covariance[0] = 1e-4;
+  return imu;
+}
+
+sensor_msgs::msg::CameraInfo
+MockRobotNode::makeCameraInfo(const rclcpp::Time &stamp) const {
+  // 内参完全由"尺寸 + 水平视场"决定，**不读任何共享状态** —— 所以不需要凭证。
+  // 理想镜头：畸变全 0 ⇒ R 是单位阵、P 就是 K 右下补一列。
+  const double fx = cameraFocalLength();
+  const double cx = kDepthWidth / 2.0;
+  const double cy = kDepthHeight / 2.0;
+
+  sensor_msgs::msg::CameraInfo info;
+  info.header.stamp = stamp;
+  info.header.frame_id = camera_optical_frame_;
+  info.width = kDepthWidth;
+  info.height = kDepthHeight;
+  info.distortion_model = "plumb_bob";
+  info.d = {0.0, 0.0, 0.0, 0.0, 0.0};
+  info.k = {fx, 0.0, cx, 0.0, fx, cy, 0.0, 0.0, 1.0};
+  info.r = {1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
+  info.p = {fx, 0.0, cx, 0.0, 0.0, fx, cy, 0.0, 0.0, 0.0, 1.0, 0.0};
+  return info;
+}
+
+sensor_msgs::msg::Image
+MockRobotNode::makeDepthImage(std::lock_guard<std::mutex> & /*lock*/,
+                              const rclcpp::Time &stamp) const {
+  const double fx = cameraFocalLength();
+  const double cx = kDepthWidth / 2.0;
+  const double cy = kDepthHeight / 2.0;
+
+  // 相机安装点：相对 base 的 (0.2, 0, 0.3)，随机器人朝向一起转。
+  const double cam_x = pose_.x + kCameraOffsetX * std::cos(pose_.yaw);
+  const double cam_y = pose_.y + kCameraOffsetX * std::sin(pose_.yaw);
+  const double cam_z = kCameraOffsetZ;
+  const double cos_yaw = std::cos(pose_.yaw);
+  const double sin_yaw = std::sin(pose_.yaw);
+
+  std::vector<float> meters(static_cast<std::size_t>(kDepthWidth) * kDepthHeight);
+  for (int v = 0; v < kDepthHeight; ++v) {
+    for (int u = 0; u < kDepthWidth; ++u) {
+      // 光学系下的射线：z 朝前。用 (u - cx) 而不是 (u + 0.5 - cx)，
+      // 这样 u == cx 那一列**正好落在光轴上** —— 验收要拿它和激光对齐。
+      const double ox = (u - cx) / fx;
+      const double oy = (v - cy) / fx;
+      const double oz = 1.0;
+      const double norm = std::sqrt(ox * ox + oy * oy + oz * oz);
+
+      // 光学 (x 右, y 下, z 前) → body (x 前, y 左, z 上)：
+      //     body_x = z,   body_y = -x,   body_z = -y
+      // 这一步对应上面那条 RPY(-90°, 0, -90°) 的静态 TF —— 两者必须配套，
+      // 否则发出去的深度图和 TF 各说各话（而且都不报错）。
+      const double bx = oz / norm;
+      const double by = -ox / norm;
+      const double bz = -oy / norm;
+      // 再按机器人偏航转到世界系。
+      const double wx = bx * cos_yaw - by * sin_yaw;
+      const double wy = bx * sin_yaw + by * cos_yaw;
+
+      // rayToBox 要求方向是**单位向量**，这样 t 才等于米。
+      const double t = rayToBox(cam_x, cam_y, cam_z, wx, wy, bz);
+      // "32FC1" 存的是**沿光轴的 z 深度**，不是射线长度。
+      // 方向是单位的，所以 z 深度 = t ×（该方向在光轴上的分量）= t × bx。
+      meters[static_cast<std::size_t>(v) * kDepthWidth + u] =
+          std::isinf(t) ? std::numeric_limits<float>::infinity()
+                        : static_cast<float>(t * bx);
+    }
+  }
+
+  sensor_msgs::msg::Image image;
+  image.header.stamp = stamp;
+  image.header.frame_id = camera_optical_frame_;
+  image.height = kDepthHeight;
+  image.width = kDepthWidth;
+  image.encoding = "32FC1"; // 每像素一个 float32，单位米
+  image.is_bigendian = 0;
+  image.step = static_cast<uint32_t>(kDepthWidth * sizeof(float));
+  image.data.assign(reinterpret_cast<const uint8_t *>(meters.data()),
+                    reinterpret_cast<const uint8_t *>(meters.data()) +
+                        meters.size() * sizeof(float));
+  return image;
 }
 
 } // namespace robot_sdk::sim

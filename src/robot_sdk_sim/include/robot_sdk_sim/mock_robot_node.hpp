@@ -8,6 +8,8 @@
 
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
+#include <sensor_msgs/msg/camera_info.hpp>
+#include <sensor_msgs/msg/image.hpp>
 #include <sensor_msgs/msg/imu.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
 #include <sensor_msgs/msg/laser_scan.hpp>
@@ -79,9 +81,25 @@ class MockRobotNode : public rclcpp::Node {
   void publishFrames();
   void publishJoints();
 
-  /// 发布板载传感器（激光 + IMU），内部降到 10 Hz。
+  /// 发布板载传感器（激光 + IMU + 相机），内部降到 10 Hz。
+  /// 它只负责**节奏**和**发布**；每一路的数据在下面的 `makeXxx` 里组装。
   /// 与状态、关节一样：**锁内取数、锁外发布**（本文档 §4.3 纪律 1）。
   void publishSensors();
+
+  /// 组装各路传感器数据 —— 与 `makeStatus` / `makeNavFeedback` 同一模式：
+  /// 在**锁内**被调用，`lock` 是**凭证**（参数不命名 = 一眼看出它不是数据）。
+  ///
+  /// `previous_yaw` 由调用方传进来（它读的是同一个 `pose_`），
+  /// 这样 `makeImu` 仍然是 `const` —— 它不必去改 `last_yaw_`。
+  sensor_msgs::msg::LaserScan makeScan(std::lock_guard<std::mutex>& lock,
+                                       const rclcpp::Time& stamp) const;
+  sensor_msgs::msg::Imu makeImu(std::lock_guard<std::mutex>& lock,
+                                const rclcpp::Time& stamp, double previous_yaw) const;
+  /// 内参是**常量**，不读任何共享状态 —— 所以它不需要凭证，也不收 lock。
+  sensor_msgs::msg::CameraInfo makeCameraInfo(const rclcpp::Time& stamp) const;
+  /// 深度图要逐像素射线求交，**读 `pose_`** —— 需要凭证。
+  sensor_msgs::msg::Image makeDepthImage(std::lock_guard<std::mutex>& lock,
+                                         const rclcpp::Time& stamp) const;
 
   /// 把"此刻的状态"拼成一条 RobotStatus。
   ///
@@ -114,6 +132,8 @@ class MockRobotNode : public rclcpp::Node {
   rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr joint_pub_;
   rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr scan_pub_;
   rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr imu_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::CameraInfo>::SharedPtr camera_info_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr depth_pub_;
 
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
   std::unique_ptr<tf2_ros::StaticTransformBroadcaster> static_tf_broadcaster_;
@@ -160,6 +180,10 @@ class MockRobotNode : public rclcpp::Node {
   std::string laser_frame_{"laser_frame"};
   std::string imu_frame_{"imu_link"};
   std::string camera_frame_{"camera_link"};
+  /// 相机的**光学帧**。ROS 约定图像数据的坐标系是：z 朝前、x 朝右、y 朝下；
+  /// 而 body 系是 x 前 / y 左 / z 上 —— 两者差一个固定的旋转。
+  /// 少广播这一帧，客户拿 TF 去投影深度图会得到**错误但看起来合理**的结果。
+  std::string camera_optical_frame_{"camera_optical_frame"};
 };
 
 }  // namespace robot_sdk::sim
