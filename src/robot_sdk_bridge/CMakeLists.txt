@@ -14,6 +14,8 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_action REQUIRED)
 find_package(nav2_msgs REQUIRED)
+find_package(control_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
 find_package(robot_sdk_interfaces REQUIRED)
 find_package(robot_sdk_core REQUIRED)
 
@@ -26,6 +28,18 @@ ament_target_dependencies(nav2_adapter
     robot_sdk_core
 )
 install(TARGETS nav2_adapter DESTINATION lib/${PROJECT_NAME})
+
+add_executable(motion_adapter src/motion_adapter.cpp)
+ament_target_dependencies(motion_adapter
+    rclcpp
+    rclcpp_action
+    control_msgs
+    sensor_msgs
+    robot_sdk_interfaces
+    robot_sdk_core
+)
+install(TARGETS motion_adapter DESTINATION lib/${PROJECT_NAME})
+
 install(DIRECTORY launch DESTINATION share/${PROJECT_NAME})
 
 ament_package()

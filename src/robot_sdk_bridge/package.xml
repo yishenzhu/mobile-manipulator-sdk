@@ -4,8 +4,8 @@
     <name>robot_sdk_bridge</name>
     <version>0.1.0</version>
     <description>
-    适配层：把 SDK 的动作翻译到具体的下游后端上，客户代码不依赖 nav2_msgs / moveit_msgs。
-    目前提供导航（SDK → Nav2）。
+    适配层：把 SDK 的动作翻译到具体的下游后端上，客户代码不依赖 nav2_msgs / control_msgs。
+    目前提供导航（SDK → Nav2）与运动（SDK → FollowJointTrajectory）。
     </description>
     <maintainer email="3464428214@qq.com">Robot SDK</maintainer>
     <license>Apache-2.0</license>
@@ -15,6 +15,8 @@
     <depend>rclcpp</depend>
     <depend>rclcpp_action</depend>
     <depend>nav2_msgs</depend>
+    <depend>control_msgs</depend>
+    <depend>sensor_msgs</depend>
     <depend>robot_sdk_interfaces</depend>
     <!-- 为 robot_sdk/detail/action_slot.hpp（动作服务端的通用槽位） -->
     <depend>robot_sdk_core</depend>
