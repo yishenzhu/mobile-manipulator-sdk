@@ -1,3 +1,4 @@
+#include "robot_sdk/detail/joint_wrap.hpp"
 #include "robot_sdk_sim/mock_robot_node.hpp"
 #include "robot_sdk_sim/tick_action.hpp"
 
@@ -565,8 +566,15 @@ rclcpp_action::GoalResponse MockRobotNode::handleMotionGoal(
           unknown = true;
           break;
         }
-        target[static_cast<std::size_t>(it - joint_names_.begin())] =
-            goal->target.position[k];
+        const std::size_t index = static_cast<std::size_t>(it - joint_names_.begin());
+        double wanted = goal->target.position[k];
+        // 连续关节：走最短的一边，否则 0.3 → 7.0 会老实转 6.7 rad（≈384°）。
+        if (std::find(config_.motion.continuous_joints.begin(),
+                      config_.motion.continuous_joints.end(),
+                      goal->target.name[k]) != config_.motion.continuous_joints.end()) {
+          wanted = joint_positions_[index] + shortestAngleDelta(joint_positions_[index], wanted);
+        }
+        target[index] = wanted;
       }
       if (!unknown) {
         motion_.target = std::move(target);
