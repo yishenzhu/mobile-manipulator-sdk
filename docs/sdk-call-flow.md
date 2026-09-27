@@ -313,7 +313,7 @@ config.navigation.action_name = "sdk/navigate_to_pose";   // 就这一行
 
 > **判据**：一个参数如果只在启动时读，就必须**说清它是启动时定的** ——
 > 否则就成了"改了不生效"的死配置。`behavior_tree` 原本是这种（只在构造时读一次），
-> 现在改成每次发目标时读。（反向的例子：SDK 的 `max_acceleration` **声明了但没有任何后端兑现**。）
+> 现在改成每次发目标时读。（反向的例子：SDK 的 `avoid_obstacles` —— 到这一版为止**仍然没有后端兑现**。）
 
 **还有一类旋钮：后端自己的配置文件里，必须"成对看"才不会被误导。**
 它们不在适配器上，而在后端（Nav2）自己的参数文件里：
@@ -327,6 +327,68 @@ config.navigation.action_name = "sdk/navigate_to_pose";   // 就这一行
 会被 `progress_checker`（10 s / 0.3 m）判死。表现是"**停在目标旁边反复超时**"，
 看着像导航坏了，其实是转身太慢。
 **RPP 每一拍都从零重算，所以调大前者没用，必须同时给够后者。**
+
+---
+
+### 3.5 一次关节运动：和导航哪里不一样
+
+导航那条线上的适配器干的是**转发** —— 两边形状几乎一样（都是"去某个位姿"，都能报进度、能取消）。
+运动这条线不是：**SDK 和下游的形状就不一样**，适配器得**补出下游要、而 SDK 没给的信息**。
+
+```text
+      客户代码
+         │  说：把这 5 个关节转到这些角度，每个关节速度别超过 0.5
+         ▼
+   运动动作（动作名字：sdk/move_to_joint_positions）
+         │
+    ┌────┴──────────────────────────────┐
+    │  motion_adapter                    │  ← 在这里把"一个点"补成"一条轨迹"
+    │   · 起点    ← 从 /joint_states 拿（SDK 没给）
+    │   · 时长    ← 取所有关节里最慢的那个
+    │   · 完成度  ← 拿实际位置和起点自己算（下游没有这个字段）
+    └────┬──────────────────────────────┘
+         │
+         ▼
+   关节轨迹控制器（FollowJointTrajectory）──▶ 电机
+```
+
+**三处落差**：
+
+| | SDK 给的 | 下游要的 | 适配器怎么办 |
+|---|---|---|---|
+| **目标** | **一个目标点** + 速度上限 | **一串带时间戳的点**（轨迹）| 补起点、算时长，生成两个点 |
+| **进度** | `completion_percentage` | **没有这个字段** | 自己算：`1 − 当前最大误差 / 起始最大误差` |
+| **单位** | 数字 | 数字 | **不假定单位**（见下）|
+
+**时长取"所有关节里最慢的那个"** —— 于是所有关节**同时到位**：
+
+```text
+时长 = max( |Δ| / v ,  2√(|Δ| / a) )
+            └─ 速度约束   └─ 加速度约束（加速走一半、减速走一半）
+```
+
+【量】验收时：走 0.2 rad、速度给 2.0（够快）、加速度给 0.5（很抠）
+→ 只按速度算得 **0.10 秒**，实际 **1.26 秒** = `2√(0.2/0.5)`。**加速度真的在起作用。**
+
+**关节值的单位是"逐关节"的** —— 这不是我们的约定，是消息定义就那么写的：
+
+| 关节类型 | 单位 |
+|---|---|
+| 旋转（revolute / continuous）| **弧度** |
+| 移动（prismatic）| **米** |
+
+而且它是**相对于该关节自己的"零位"**，不是编码器原始值。
+
+我们这套的 5 个关节就**混着两种**：`shoulder_pan` / `shoulder_lift` / `elbow` / `wrist` 是旋转关节（弧度），
+**`gripper_joint` 是移动关节（米）** —— 依据是配置里的 `gripper_open_position: 0.04`：
+4 厘米才像"张开"，0.04 弧度只有 2.3°，不像。
+
+> 所以适配器**不能假定单位**。`motion_adapter` 里没有一处 `sin` / `cos` / `atan2` ——
+> 公式只要求 `Δ` 和 `a` **单位一致**，换成移动关节一行都不用改。
+>
+> ⚠️ 一个已知的坑：**连续旋转关节的"绕圈"**。0 和 2π 是同一个物理姿态，
+> 但适配器算出来的 `Δ` 会是 `2π` → 它会老实多转一整圈。真机驱动通常把角度**连续累加**（不会踩），
+> 只报 −π..π 的驱动就会踩。**现在的实现不做绕圈处理。**
 
 ---
 
@@ -521,6 +583,45 @@ Result<Pose2D> currentPose(Duration timeout = Duration{0.1});
 void cancelAll();
 ```
 
+### 7.2.1 运动（机械臂 + 夹爪）
+
+```cpp
+struct MotionGoal {
+  std::vector<std::string> joint_names{};    // 要动哪些关节（必须与 positions 一一对应）
+  std::vector<double> positions{};           // 目标角度 / 位移（单位逐关节不同，见 §3.5）
+  double max_velocity{0.0};                  // 每个关节各自的速度上限；<= 0 = 用配置默认
+  double max_acceleration{0.0};              // <= 0 = 由后端决定
+  double timeout_s{0.0};                     // <= 0 = 用配置里的默认值
+};
+
+struct MotionFeedback {
+  std::vector<std::string> joint_names{};
+  std::vector<double> positions{};           // 此刻的实际位置
+  double completion_percentage{0.0};         // 0 → 1
+};
+
+struct MotionResult {
+  bool success{false};                       // 第二层：关节真的到位了吗
+  double final_position_error{0.0};          // 各关节误差里的**最大值**
+  std::string message{};
+};
+
+bool serverAvailable(Duration timeout);
+std::shared_ptr<ActionHandle<Action>> moveToJointPositionsAsync(
+    const MotionGoal& goal, FeedbackCallback on_feedback = nullptr);
+Result<MotionResult> moveToJointPositions(const MotionGoal& goal);
+
+Result<MotionResult> moveToNamedTarget(const std::string& name);   // 名字取自配置
+Result<MotionResult> home();
+Result<MotionResult> setGripper(double position);
+Result<MotionResult> openGripper();
+Result<MotionResult> closeGripper();
+void cancelAll();
+```
+
+> **`max_velocity` 是"每个关节"的上限，不是末端速度。** 跟末端（夹爪/工具）走多快无关 ——
+> SDK 里没有表达末端速度的量（那要雅可比）。
+
 ### 7.3 那个"目标句柄"：`ActionHandle`
 
 ```cpp
@@ -585,11 +686,14 @@ const T& valueOr(const T& fallback) const;// 失败时给兜底值
 | **spin** | "让执行器转起来" —— 也就是本文的"值班" |
 | **通信质量** | 可靠/尽力、队列多深…。**两边不一致会静默收不到** |
 | **坐标变换** | "A 坐标系里的点，在 B 坐标系里是多少" |
+| **关节** | 机器人身上能动的那个部件，名字像 `shoulder_pan_joint` |
+| **轨迹** | 一串"某时刻该在哪"的快照 —— **不止一个终点** |
+| **轨迹点** | 那串快照里的一个：位置 + "从出发算起多久到"（`time_from_start`）|
 | **服务端 / 客户端** | 动作（或服务）的**提供方** / **使用方** |
 
 ---
 
-## 9. 五个常见误解
+## 9. 七个常见误解
 
 | 误解 | 事实 |
 |---|---|
@@ -598,6 +702,8 @@ const T& valueOr(const T& fallback) const;// 失败时给兜底值
 | **"忘了 spin 只是慢一点"** | ❌ 是**完全收不到** —— 所有等待都会超时 |
 | **"spin 就一个线程"** | ❌ 底下是**线程池**，默认 CPU 核数那么多个 |
 | **"流程成功就是到了"** | ❌ 那只说明流程走完了，见 §6 |
+| **"`max_velocity` 是末端移动速度"** | ❌ 是**每个关节各自**的速度上限（rad/s 或 m/s），与末端走多快无关 |
+| **"关节位置一定是弧度"** | ❌ **逐关节**看类型：旋转是弧度、移动是米，同一列里能混着两种（见 §3.5）|
 
 ---
 

@@ -26,8 +26,7 @@ struct MotionGoal {
   double max_velocity{0.0};
 
   /// 加速度上限。**<= 0 = 由后端决定。**
-  /// ⚠️ 当前随 SDK 提供的后端（mock / 适配器）**都还没读它** ——
-  /// 见 学习笔记.md 的「声明了但没兑现」清单。
+  /// 兑现情况：`motion_adapter` 读它（折算进轨迹时长）；mock 还没读。
   double max_acceleration{0.0};
 
   /// 超时秒数。**<= 0 = 用 `MotionConfig::default_timeout_s`。**
