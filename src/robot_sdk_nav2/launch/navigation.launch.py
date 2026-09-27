@@ -19,17 +19,26 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch_ros.actions import Node
 
-# 生命周期管理器按这个顺序把它们激活起来。
-NAV2_NODES = ["planner_server", "controller_server", "behavior_server", "bt_navigator"]
+# 生命周期管理器按这个顺序把它们激活起来。map_server 必须**最前** ——
+# 全局代价地图的 static_layer 要等它把地图发出来。
+NAV2_NODES = ["map_server", "planner_server", "controller_server", "behavior_server", "bt_navigator"]
 
 
 def generate_launch_description():
-    params = os.path.join(
-        get_package_share_directory("robot_sdk_nav2"), "config", "nav2_params.yaml"
-    )
+    share = get_package_share_directory("robot_sdk_nav2")
+    params = os.path.join(share, "config", "nav2_params.yaml")
+    room_map = os.path.join(share, "maps", "room.yaml")
 
     return LaunchDescription(
         [
+            # ── 静态地图：全局代价地图的 static_layer 从它拿 ──
+            Node(
+                package="nav2_map_server",
+                executable="map_server",
+                name="map_server",
+                output="screen",
+                parameters=[params, {"yaml_filename": room_map}],
+            ),
             # ── 被控对象：模拟机器人（发 TF / 激光，收 cmd_vel）──
             Node(
                 package="robot_sdk_sim",

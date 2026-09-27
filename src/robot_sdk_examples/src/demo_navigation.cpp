@@ -51,9 +51,9 @@ int main(int argc, char** argv) {
   goal.target = {2.0, 1.0, 0.0};
   goal.max_speed = 0.5;
   goal.timeout_s = 20.0;
-  // avoid_obstacles 目前**没有任何后端兑现**（mock 只在 true 时打一次 WARN）。
-  // 这里显式给 false 只是让示例输出干净 —— 它**不表示**"关掉了避障"，没有避障可关。
-  goal.avoid_obstacles = false;
+  // avoid_obstacles：默认就是 true。**mock 会真的用它** —— 目标走不到
+  // （比如落在墙外）它当场报失败，而不是撞上去。Nav2 那边则是"始终避障"，传 false 也做不到。
+  goal.avoid_obstacles = true;
 
   std::printf("去 (%.1f, %.1f) ...\n", goal.target.x, goal.target.y);
 
@@ -82,7 +82,6 @@ int main(int argc, char** argv) {
   robot_sdk::NavigationGoal back;
   back.target = {0.0, 0.0, 0.0};
   back.timeout_s = 20.0;
-  back.avoid_obstacles = false;
 
   std::printf("回原点（阻塞调用）...\n");
   if (auto result = robot.navigation().goTo(back); result.ok()) {

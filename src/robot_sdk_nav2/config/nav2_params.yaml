@@ -35,8 +35,30 @@ controller_server:
       plugin: "nav2_controller::SimpleGoalChecker"
       xy_goal_tolerance: 0.15
       yaw_goal_tolerance: 0.25
+    # 原地转正交给 shim，路径跟踪还是 RPP（shim 会在内部把 RPP 造出来）。
+    # 27c 那轮没有 shim，只能靠调大 max_angular_accel 把 RPP 的"每拍从零重算"
+    # 顶上去（实发角速度 = min(请求值, max_angular_accel ÷ 控制频率)）。
+    # 现在转角速度由 shim 直接说了算，不再依赖那个隐含关系。
     FollowPath:
-      plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
+      plugin: "nav2_rotation_shim_controller::RotationShimController"
+      # ⚠️ 这里要写**插件类名**，不是 controller_plugins 里的实例名 ——
+      #    写错的话 shim 造不出内部控制器，controller_server 会直接段错误。
+      primary_controller: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
+      # 两层各管一段，而且**门槛必须错开**：
+      #   · shim —— 只在"朝向和路径差得**很多**"时先原地转正（它追的是**路径起点**的朝向）
+      #   · RPP  —— 误差小于这个门槛才轮到它；**终点那个朝向也是它转的**，shim 不管
+      # ⚠️ 门槛要**大于** RPP 的 rotate_to_heading_min_angle（默认 0.785）。
+      #    反过来设（比如 0.35）会让 shim 抢着管 20°~45° 那一段 —— 而终点附近路径
+      #    退化成一个点，"路径起点朝向"根本不是目标朝向，两层就互相拆台。
+      #    【量】实测：门槛 0.35 时机器人回到原点却卡在 -102.6°，1.79 rad 的朝向差永远转不完。
+      angular_dist_threshold: 1.5
+      # 所以 RPP 的原地转速度也必须有保证（同名的 max_angular_accel 两层共用）：
+      # 默认 3.2 ÷ 20 Hz = 0.16 rad/s，转 143° 要 15 s，会被 progress_checker 判死。
+      max_angular_accel: 20.0
+      rotate_to_heading_angular_vel: 1.0
+      forward_sampling_distance: 0.5
+      simulate_ahead_time: 1.0
+      # —— 里面那个 RPP 的（同一个命名空间下，shim 会把参数转交给它）——
       desired_linear_vel: 0.4
       lookahead_dist: 0.4
       min_lookahead_dist: 0.2
@@ -46,11 +68,6 @@ controller_server:
       min_approach_linear_velocity: 0.05
       approach_velocity_scaling_dist: 0.4
       use_regulated_linear_velocity_scaling: true
-      # 原地转身速度实际是 rotate_to_heading_angular_vel 被 max_angular_accel ÷ 控制频率
-      # 卡住后的结果（RPP 每拍从零重算）。默认 3.2 在 20 Hz 下只给出 0.16 rad/s：转 143°
-      # 要 15 s，会被 progress_checker（10 s / 0.3 m）判死 —— 这两个值必须一起给够。
-      rotate_to_heading_angular_vel: 1.0
-      max_angular_accel: 20.0
 
 local_costmap:
   local_costmap:
@@ -91,14 +108,14 @@ global_costmap:
       publish_frequency: 1.0
       global_frame: map
       robot_base_frame: base_footprint
-      # 没有地图 ⇒ 不用 static_layer，改成跟着机器人滚的窗口，靠激光实时建
-      rolling_window: true
-      width: 12
-      height: 12
+      # 有静态地图了 ⇒ 静态层 + **不滚动**。尺寸跟着地图走，所以这里**不写 width/height**。
       resolution: 0.05
       robot_radius: 0.25
       track_unknown_space: true
-      plugins: ["obstacle_layer", "inflation_layer"]
+      plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
+      static_layer:
+        plugin: "nav2_costmap_2d::StaticLayer"
+        map_subscribe_transient_local: true
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer"
         enabled: true
@@ -142,3 +159,9 @@ behavior_server:
       plugin: "nav2_behaviors::DriveOnHeading"
     wait:
       plugin: "nav2_behaviors::Wait"
+
+map_server:
+  ros__parameters:
+    use_sim_time: false
+    # yaml_filename 由 launch 文件传 —— 只有它知道这个包装到哪去了。
+    topic_name: map

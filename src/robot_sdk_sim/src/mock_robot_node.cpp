@@ -33,6 +33,8 @@ constexpr double kBatteryVoltagePerPercent = 0.05;
 constexpr int kFeedbackEveryNTicks = 5;
 // 客户没给 max_speed（或给了 <= 0）时用的默认速度。
 constexpr double kDefaultMaxSpeedMps = 0.5;
+// avoid_obstacles 用的车身余量：朝目标看出去，离墙比"剩余距离"还近这么多，就别往前开了。
+constexpr double kRobotClearanceM = 0.3;
 
 // 关节运动的到位容差（弧度 / 米），以及客户没给 max_velocity 时的默认值。
 constexpr double kJointTolerance = 0.01;
@@ -51,8 +53,8 @@ constexpr double kScanRangeMax = 10.0;
 constexpr double kLaserOffsetX = 0.1;
 constexpr double kLaserOffsetZ = 0.2; // 激光是水平的，z 不参与计算；写对是为了诚实
 
-// 模拟机器人的"世界"：一个长方体房间，**六面就是它唯一的障碍物**。
-// 它没有障碍物模型（见 docs/mock-robot-node.md §1.3），所以扫描得在这里"编"出来。
+// 模拟机器人的"世界"：一个长方体房间，**六面就是它全部的障碍物**。
+// 扫描和"前方有没有挡路的"都拿它算 —— 没有别的障碍物。
 constexpr double kRoomHalfWidth = 5.0;  // x ∈ [-5, 5]
 constexpr double kRoomHalfHeight = 4.0; // y ∈ [-4, 4]
 // 房间是有高度的：地面 z=0、天花板 z=2.5。
@@ -366,6 +368,21 @@ void MockRobotNode::navTick() {
           return {result, nullptr}; // 结束（骨架会收尾）
         }
 
+        // avoid_obstacles：朝目标方向看一眼，够不够走到。挡着就停下 ——
+        // 这个模拟器**不会绕路**（绕路是规划器的活），它只保证不撞。
+        if (nav_.avoid_obstacles) {
+          const double wall = rayToBox(pose_.x, pose_.y, kLaserOffsetZ,
+                                       (nav_.target.x - pose_.x) / remaining,
+                                       (nav_.target.y - pose_.y) / remaining, 0.0);
+          if (wall < remaining + kRobotClearanceM) {
+            auto result = std::make_shared<NavigateToPose::Result>();
+            result->success = false;
+            result->final_distance_error = static_cast<float>(remaining);
+            result->message = "前方被挡，不走了";
+            return {result, nullptr};
+          }
+        }
+
         // 朝目标走一步，并把朝向转向目标（模拟一个会转头的前进底盘）。
         const double step = std::min(nav_.max_speed * kControlPeriodS, remaining);
         pose_.x += step * (nav_.target.x - pose_.x) / remaining;
@@ -406,6 +423,7 @@ MockRobotNode::handleNavGoal(const rclcpp_action::GoalUUID & /*uuid*/,
       nav_.target = toPose2D(goal->target_pose);
       nav_.max_speed =
           goal->max_speed > 0.0f ? goal->max_speed : kDefaultMaxSpeedMps;
+      nav_.avoid_obstacles = goal->avoid_obstacles;
     }
   }
 
@@ -413,9 +431,8 @@ MockRobotNode::handleNavGoal(const rclcpp_action::GoalUUID & /*uuid*/,
     RCLCPP_WARN(get_logger(), "拒绝导航目标：已经在导航中");
     return rclcpp_action::GoalResponse::REJECT;
   }
-  if (goal->avoid_obstacles) {
-    RCLCPP_WARN_ONCE(get_logger(),
-                     "本模拟器没有障碍物模型，avoid_obstacles 被忽略");
+  if (!goal->avoid_obstacles) {
+    RCLCPP_WARN(get_logger(), "avoid_obstacles=false：路上撞墙也不管");
   }
   return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
 }

@@ -168,6 +168,9 @@ class MockRobotNode : public rclcpp::Node {
     ActionSlot<NavigateToPose> slot; ///< 三态 + 句柄 + 一位取消信箱
     Pose2D target{};
     double max_speed{0.0};
+    /// 要不要避障。**true = 目标在路上被挡就当场报失败**（本模拟器不会绕路，只保证不撞）；
+    /// false = 直冲，撞不撞不管。
+    bool avoid_obstacles{true};
     int feedback_divider{0}; ///< 反馈降频：每 N 个控制周期发一条
   };
   NavJob nav_;

@@ -313,7 +313,7 @@ config.navigation.action_name = "sdk/navigate_to_pose";   // 就这一行
 
 > **判据**：一个参数如果只在启动时读，就必须**说清它是启动时定的** ——
 > 否则就成了"改了不生效"的死配置。`behavior_tree` 原本是这种（只在构造时读一次），
-> 现在改成每次发目标时读。（反向的例子：SDK 的 `avoid_obstacles` —— 到这一版为止**仍然没有后端兑现**。）
+> 现在改成每次发目标时读。（反向的例子：`avoid_obstacles=false` —— Nav2 **始终避障**，做不到。）
 
 **还有一类旋钮：后端自己的配置文件里，必须"成对看"才不会被误导。**
 它们不在适配器上，而在后端（Nav2）自己的参数文件里：
@@ -327,6 +327,19 @@ config.navigation.action_name = "sdk/navigate_to_pose";   // 就这一行
 会被 `progress_checker`（10 s / 0.3 m）判死。表现是"**停在目标旁边反复超时**"，
 看着像导航坏了，其实是转身太慢。
 **RPP 每一拍都从零重算，所以调大前者没用，必须同时给够后者。**
+
+**而且这类旋钮之间还会互相牵制** —— 用 `RotationShimController` 把 RPP 包起来之后多了一层：
+
+| 谁 | 什么时候原地转 | 它追的是哪个角 |
+|---|---|---|
+| **shim** | 误差 > `angular_dist_threshold` | **路径起点**的朝向 |
+| **RPP** | 误差 > `rotate_to_heading_min_angle`（默认 0.785）| 路径 / **目标**的朝向 |
+
+两个门槛**必须错开，而且 shim 的要大于 RPP 的** ✅ —— 否则 shim 会抢着管中间那一段；
+而**终点附近路径退化成一个点**，"路径起点朝向"根本不是目标朝向，**两层就各追各的角**。
+
+【量】门槛设成 0.35（小于 RPP 的 0.785）时：机器人**回到了原点附近却卡在 -102.6°**，
+1.79 rad 的朝向差**永远转不完**，最后被 `progress_checker` 判死。改成 1.5 之后两个目标都到位。
 
 ---
 
@@ -579,7 +592,7 @@ struct NavigationGoal {
   Pose2D target{};                        // x, y, 朝向
   std::string frame{};                    // 空 = 用配置里的全局帧
   double max_speed{0.0};                  // <= 0 = 由后端决定
-  bool avoid_obstacles{true};             // ⚠️ 当前没有后端兑现它
+  bool avoid_obstacles{true};             // 走不到就别走；mock 会预检，Nav2 始终避障
   double timeout_s{0.0};                  // <= 0 = 用配置里的默认值
 };
 
@@ -744,5 +757,4 @@ const T& valueOr(const T& fallback) const;// 失败时给兜底值
 | # | 事项 | 为什么 / 怎么做 | 相关 |
 |---|---|---|---|
 | 1 | **MoveIt 适配器** | SDK 一旦有**笛卡尔目标**（"把夹爪移到 (x, y, z)"）或需要**绕障**，就必须有人做逆解与规划 —— 那是 MoveIt 的活。它**同样讲 `FollowJointTrajectory`**，所以客户代码不用动，加一个适配器即可 | §3.5 |
-| 2 | `avoid_obstacles` **没有后端兑现** | 传 `true` **不等于**会避障；到这一版为止没人在乎它 | §3.4 |
 
