@@ -5,6 +5,7 @@
     <description>
     实现 Robot SDK 接口的模拟移动操作机器人。
     有了它，示例、集成测试和新手上手都不需要 Gazebo 或真机。
+    另含一个假的关节轨迹控制器，用来验运动链路的下游。
     </description>
     <maintainer email="3464428214@qq.com">Robot SDK</maintainer>
     <license>Apache-2.0</license>
@@ -12,9 +13,12 @@
     <buildtool_depend>ament_cmake</buildtool_depend>
 
     <depend>rclcpp</depend>
+    <depend>rclcpp_action</depend>
     <depend>geometry_msgs</depend>
     <depend>sensor_msgs</depend>
     <depend>tf2_ros</depend>
+    <depend>control_msgs</depend>
+    <depend>trajectory_msgs</depend>
     <depend>robot_sdk_interfaces</depend>
     <depend>robot_sdk_core</depend>
 

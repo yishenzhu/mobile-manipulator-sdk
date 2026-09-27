@@ -120,7 +120,8 @@ class MotionAdapter : public rclcpp::Node {
         for (int index : indices) {
           start_positions_.push_back(joint_positions_[index]);
         }
-        initial_error_ = maxError(start_positions_, target.position);
+        target_positions_ = target.position;
+        initial_error_ = maxError(start_positions_, target_positions_);
       }
     }
     if (busy) {
@@ -265,7 +266,7 @@ class MotionAdapter : public rclcpp::Node {
       std::lock_guard<std::mutex> lock(mutex_);
       sdk_handle = slot_.handle;
       initial_error = initial_error_;
-      error = maxError(feedback->actual.positions, feedback->desired.positions);
+      error = maxError(feedback->actual.positions, target_positions_);
       last_error_ = static_cast<float>(error);
     }
     if (!sdk_handle || !sdk_handle->is_active()) {
@@ -276,9 +277,10 @@ class MotionAdapter : public rclcpp::Node {
     out->current.name = feedback->joint_names;
     out->current.position = feedback->actual.positions;
     // 分母是**目标下达时**的误差：它若为 0，这个目标本来就不需要动。
+    // 量纲是**百分数**（与 mock 一致），不是 0..1。
     out->completion_percentage = initial_error > 0.0
-                                     ? static_cast<float>(1.0 - error / initial_error)
-                                     : 1.0F;
+                                     ? static_cast<float>(100.0 * (1.0 - error / initial_error))
+                                     : 100.0F;
     sdk_handle->publish_feedback(out);
   }
 
@@ -346,6 +348,9 @@ class MotionAdapter : public rclcpp::Node {
   std::vector<double> joint_positions_;
   /// 目标下达那一刻的各关节角 —— 轨迹起点（每条轨迹只发一次）。
   std::vector<double> start_positions_;
+  /// 目标位置 —— 完成度的分子拿它算。**不能用下游反馈里的 `desired`**：
+  /// 那是"此刻应该在哪"，追踪正常时它和实际位置几乎重合，误差恒为 0。
+  std::vector<double> target_positions_;
   /// 目标下达那一刻的最大误差 —— 完成度的分母。
   double initial_error_ = 0.0;
   /// 最后一条反馈里的最大误差 —— 下游结果里没有这个字段，只能用它。

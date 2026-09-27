@@ -250,7 +250,7 @@ if (nav_.running()) {
                ▼                  ▼                   ▼
           ┌─────────────────────────────────────────────────┐
           │              共享状态（mutex_ 保护）              │
-          │  nav_ / motion_ 槽位、nav_target_、…（意图）      │
+          │  nav_ / motion_ 里的字段（意图）                  │
           │  pose_、joint_positions_、battery_、…（真值）     │
           └─────────────────────────────────────────────────┘
 ```
@@ -280,8 +280,8 @@ if (nav_.running()) {
 | `pose_`（机器人在哪） | **`navTick`** 或 **`cmdVelTick`** ← 都跑在控制回路上（**不同时用**，见 §1.4） | `makeNavFeedback`、`publishFrames`、传感器 |
 | `joint_positions_` | **`motionTick`** ← 控制回路 | `makeMotionFeedback`、`publishJoints`、状态服务 |
 | `battery_` / `charging_` / `uptime_s_` | **`statusTick`** ← 状态回路 | `makeStatus` |
-| `nav_` 槽位 / `nav_target_` / `nav_max_speed_` | **`handleNavGoal` / `handleNavCancel` / `handleNavAccepted`** ← 动作车道 | **`navTick`**（读并消费） |
-| `motion_` 槽位 / `motion_target_` / `motion_max_velocity_` / `motion_initial_error_` | 同上 ← 动作车道 | **`motionTick`** |
+| `nav_` 槽位 / `nav_.target` / `nav_.max_speed` | **`handleNavGoal` / `handleNavCancel` / `handleNavAccepted`** ← 动作车道 | **`navTick`**（读并消费） |
+| `motion_` 槽位 / `motion_.target` / `motion_.max_velocity` / `motion_.initial_error` | 同上 ← 动作车道 | **`motionTick`** |
 | `joint_names_` | 构造函数 | 各处（构造后**只读**） |
 
 > **构造期例外**：`joint_names_` / `joint_positions_` 在构造函数里初始化（`ensureJoint()` 可能追加一个夹爪关节），但**构造完成后就不再变**，所以它们不在"谁写谁读"的竞争范围内。
@@ -328,14 +328,14 @@ MoveToJointPositions::Feedback makeMotionFeedback(std::lock_guard<std::mutex>&) 
                              handleNavGoal:
                              ├─ 拿 mutex_
                              ├─ 已经在导航？ → 拒绝（可观测，见 §1.3）
-                             ├─ nav_.reserve()            ← 【写意图】占位
-                             ├─ nav_target_ = (2.0, 1.0)  ← 【写意图】去哪儿
-                             ├─ nav_max_speed_ = 0.5      ← 【写意图】多快
+                             ├─ nav_.slot.reserve()            ← 【写意图】占位
+                             ├─ nav_.target = (2.0, 1.0)  ← 【写意图】去哪儿
+                             ├─ nav_.max_speed = 0.5      ← 【写意图】多快
                              └─ 放 mutex_
                              ↑ 机器人**一动没动**，pose_ 还是 (0,0)
 
 ② 框架紧接着（同一线程）──▶ handleNavAccepted:
-                             └─ nav_.begin(handle)        ← 【写意图】相位→kRunning + 句柄就位
+                             └─ nav_.slot.begin(handle)        ← 【写意图】相位→kRunning + 句柄就位
 
 ③ 从此每 20 ms，控制回路车道：
                              navTick:
@@ -569,20 +569,37 @@ if (!slot.running()) return;   // 空转 —— 也顺带保证下面的 handle 
 ### 5.3 `tickAction`：只写一遍的骨架
 
 ```cpp
+template <typename Action>
+struct TickOutput {                                     // advance 这一拍的产出
+  std::shared_ptr<typename Action::Result> result;      // 非空 = 本目标结束
+  std::shared_ptr<typename Action::Feedback> feedback;  // 非空 = 报一次进度
+};
+
 template <typename Action, typename Advance>
 void tickAction(std::mutex &mutex, ActionSlot<Action> &slot, Advance &&advance) {
   // 锁内：推进数据 + 判定终态（不碰框架）
   //   1. 不 running → 直接返回
-  //   2. 有取消请求 → 造 result（"canceled by client"）
-  //   3. 否则 → 调 advance(lock, result, feedback)   ← 各动作的实质逻辑
+  //   2. 客户请求过取消 → 回一个**默认构造的** result（这是骨架的事）
+  //   3. 否则 → output = advance(lock)      ← 各动作的实质逻辑，只在"正常推进"时被调
   // 锁外：succeed / canceled / publish_feedback
 }
 ```
 
+**取消由骨架一手包办** —— `advance` **根本不知道有"取消"这回事**。它的契约因此是"**一个进、一个出**"：
+
+```cpp
+TickOutput<Action> advance(std::lock_guard<std::mutex> &lock);
+```
+
+> **为什么不问 `advance`"取消时 result 该长什么样"**：那等于让"取消"这个事实**穿过边界两次**
+> （一次 `bool`、一次 result），调用点的参数表里就会混着**凭证 / 这一拍的处境 / 两个可选输出** ——
+> 看不出哪个是"我要用的"、哪个是"我得转手的"。
+> 而它换来的只是一句**没人读**的文案：取消这件事，**终端码（`canceled()`）已经说清了**。
+
 三个设计点值得说：
 
 1. **`advance` 在锁内被调用**，所以它拿得到凭证 `lock`（`makeNavFeedback(lock)` 需要它）。锁纪律因此**不可能被绕过** —— 不是因为程序员记得，而是因为类型要求。
-2. **"返回非空 result"即表示完成**，不用 `bool done` 出参。少一个能写错的开关：原来五个 `bool` 局部变量（`send_feedback` / `done` / `canceled` …）现在只剩骨架内部的一个 `canceled`。
+2. **`TickOutput` 的两个字段都可空，且至多填一个**：填 `result` 即"结束"，填 `feedback` 即"报进度"，**两个都不填就是"这一拍只是推进了"**。不用 `bool done` 出参 —— 少一个能写错的开关：原来五个 `bool` 局部变量（`send_feedback` / `done` / `canceled` …）现在只剩骨架内部的一个 `canceled`。
 3. **`slot.finish()` 由骨架统一调用** —— 各动作不用记着复位状态（对应 §3.7 的自查方式）。
 
 改造后：`navTick` 64→27 行，`motionTick` 67→33 行，**10 个散装成员 → 2 个槽位**。
@@ -717,23 +734,25 @@ constexpr double kDefaultMaxSpeedMps = 0.5;
 ```
 ws/src/robot_sdk_sim/
 ├── include/robot_sdk_sim/
-│   └── mock_robot_node.hpp     ← 类定义 + 锁纪律的注释
+│   ├── mock_robot_node.hpp     ← 类定义 + 锁纪律的注释
+│   └── tick_action.hpp         ← 每拍骨架 `tickAction`（只有模拟器用得上）
 ├── src/
 │   ├── mock_robot_node.cpp     ← 全部实现
-│   └── mock_robot_main.cpp     ← MultiThreadedExecutor（并发设计的入口）
+│   ├── mock_robot_main.cpp     ← MultiThreadedExecutor（并发设计的入口）
+│   └── joint_trajectory_mock.cpp ← 假的下游：说 FollowJointTrajectory（验运动链路）
 └── launch/                     ← 命名空间/参数（相对名 + 参数驱动的入口）
 
 ws/src/robot_sdk_core/          ← 契约（config.hpp 定义上面所有名字）
-│   └── detail/action_slot.hpp  ← **动作服务端的通用件**：ActionSlot（三态）+ tickAction
-│                                  （mock 与适配层共用，所以它不住在 sim 里）
+│   └── detail/action_slot.hpp  ← `ActionSlot`（三态 + 取消信箱）
+│                                  mock 与适配层**都**用它，所以它住在 core
 ws/src/robot_sdk_examples/      ← **客户代码长什么样**：hello_robot / demo_navigation
-ws/src/robot_sdk_bridge/        ← 适配层：SDK 动作 → Nav2 动作（nav2_adapter）
+ws/src/robot_sdk_bridge/        ← 适配层：SDK 动作 → Nav2 / FollowJointTrajectory
 ws/学习笔记.md                   ← 逐次踩坑的历史与推导过程
 ws/docs/mock-robot-node.md      ← 本文件（mock 的内部设计）
 ws/docs/sdk-call-flow.md        ← 姊妹文档（SDK 调用流程 + 与手写 ROS 2 对比，偏入门）
 ```
 
-**读代码的建议顺序**：`config.hpp`（契约是什么）→ **`mock_robot_main.cpp`（§3 的几条车道）** → `mock_robot_node.hpp`（类结构与纪律）→ `robot_sdk/detail/action_slot.hpp`（动作骨架）→ `mock_robot_node.cpp`。
+**读代码的建议顺序**：`config.hpp`（契约是什么）→ **`mock_robot_main.cpp`（§3 的几条车道）** → `mock_robot_node.hpp`（类结构与纪律）→ `robot_sdk/detail/action_slot.hpp` + `robot_sdk_sim/tick_action.hpp`（动作骨架）→ `mock_robot_node.cpp`。
 
 ---
 

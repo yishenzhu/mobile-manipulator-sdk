@@ -357,7 +357,7 @@ config.navigation.action_name = "sdk/navigate_to_pose";   // 就这一行
 | | SDK 给的 | 下游要的 | 适配器怎么办 |
 |---|---|---|---|
 | **目标** | **一个目标点** + 速度上限 | **一串带时间戳的点**（轨迹）| 补起点、算时长，生成两个点 |
-| **进度** | `completion_percentage` | **没有这个字段** | 自己算：`1 − 当前最大误差 / 起始最大误差` |
+| **进度** | `completion_percentage` | **没有这个字段** | 自己算：`100 × (1 − 当前最大误差 / 起始最大误差)` |
 | **单位** | 数字 | 数字 | **不假定单位**（见下）|
 
 **时长取"所有关节里最慢的那个"** —— 于是所有关节**同时到位**：
@@ -389,6 +389,11 @@ config.navigation.action_name = "sdk/navigate_to_pose";   // 就这一行
 > ⚠️ 一个已知的坑：**连续旋转关节的"绕圈"**。0 和 2π 是同一个物理姿态，
 > 但适配器算出来的 `Δ` 会是 `2π` → 它会老实多转一整圈。真机驱动通常把角度**连续累加**（不会踩），
 > 只报 −π..π 的驱动就会踩。**现在的实现不做绕圈处理。**
+
+**验这条链路用的替身就在仓库里**：`ros2 run robot_sdk_sim joint_trajectory_mock`。
+它照真实 `joint_trajectory_controller` 的行为写 —— 包括反馈里的 `desired` 报的是"**此刻应该在哪**"，
+而不是最终目标。**这一点很关键**：正是它把适配器里"拿 `desired` 算完成度"的错揪了出来
+（那样算误差恒为 0，完成度会一直是 100%）。
 
 ---
 
@@ -597,7 +602,7 @@ struct MotionGoal {
 struct MotionFeedback {
   std::vector<std::string> joint_names{};
   std::vector<double> positions{};           // 此刻的实际位置
-  double completion_percentage{0.0};         // 0 → 1
+  double completion_percentage{0.0};         // 0 → 100（百分数，不是 0..1）
 };
 
 struct MotionResult {
@@ -713,3 +718,15 @@ const T& valueOr(const T& fallback) const;// 失败时给兜底值
 >
 > spin 是**泵**，不是**管道**；它不派活，它让工人上班。
 > 你只需要记住：**发出去不用它，收回来全靠它。**
+
+---
+
+## 11. 后续（TODO）
+
+| # | 事项 | 为什么 / 怎么做 | 相关 |
+|---|---|---|---|
+| 1 | **MoveIt 适配器** | SDK 一旦有**笛卡尔目标**（"把夹爪移到 (x, y, z)"）或需要**绕障**，就必须有人做逆解与规划 —— 那是 MoveIt 的活。它**同样讲 `FollowJointTrajectory`**，所以客户代码不用动，加一个适配器即可 | §3.5 |
+| 2 | `avoid_obstacles` **没有后端兑现** | 传 `true` **不等于**会避障；到这一版为止没人在乎它 | §3.4 |
+| 3 | 连续旋转关节的**"绕圈"** | 只报 −π..π 的驱动，会让适配器多转一整圈。真机驱动一般连续累加角度，不会踩 | §3.5 |
+| 4 | **mock 不读 `max_acceleration`** | 适配器已经读了，mock 还没有 | `学习笔记.md` 的「声明了但没兑现」清单第 2 行 |
+

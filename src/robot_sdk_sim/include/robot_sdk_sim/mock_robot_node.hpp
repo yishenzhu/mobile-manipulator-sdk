@@ -163,23 +163,26 @@ class MockRobotNode : public rclcpp::Node {
   Pose2D pose_{};
 
   // ── 导航状态（同样受 mutex_ 保护）──
-  /// 动作状态收在**一个槽位**里（三态 + 句柄 + 一位取消信箱）。
-  /// 以前这里是 5 个散装成员、其中 3 个 bool —— 见 action_slot.hpp 的说明。
-  ActionSlot<NavigateToPose> nav_;
-  Pose2D nav_target_{};
-  double nav_max_speed_{0.0};
-  /// 反馈降频用：每 N 个控制周期发一条反馈。
-  int nav_feedback_divider_{0};
+  /// 一次导航作业的全部状态 —— 一个概念只有这一个来源。
+  struct NavJob {
+    ActionSlot<NavigateToPose> slot; ///< 三态 + 句柄 + 一位取消信箱
+    Pose2D target{};
+    double max_speed{0.0};
+    int feedback_divider{0}; ///< 反馈降频：每 N 个控制周期发一条
+  };
+  NavJob nav_;
 
   // ── 关节运动状态（同样受 mutex_ 保护）──
-  ActionSlot<MoveToJointPositions> motion_;
-  /// 目标位置，与 `joint_positions_` **同序同长**；目标没点名的关节填当前值。
-  std::vector<double> motion_target_;
-  double motion_max_velocity_{0.0};
-  /// 起始最大误差 —— `completion_percentage` 的分母。
-  double motion_initial_error_{0.0};
-  /// 反馈降频用：每 N 个控制周期发一条反馈。
-  int motion_feedback_divider_{0};
+  struct MotionJob {
+    ActionSlot<MoveToJointPositions> slot;
+    /// 目标位置，与 `joint_positions_` **同序同长**；目标没点名的关节填当前值。
+    std::vector<double> target;
+    double max_velocity{0.0};
+    /// 起始最大误差 —— `completion_percentage` 的分母。
+    double initial_error{0.0};
+    int feedback_divider{0}; ///< 反馈降频：每 N 个控制周期发一条
+  };
+  MotionJob motion_;
   std::vector<std::string> joint_names_;
   std::vector<double> joint_positions_;
   double battery_{100.0};

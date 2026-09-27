@@ -1,4 +1,5 @@
 #include "robot_sdk_sim/mock_robot_node.hpp"
+#include "robot_sdk_sim/tick_action.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -325,9 +326,9 @@ MockRobotNode::makeStatus(std::lock_guard<std::mutex> & /*lock*/) const {
   RobotStatus status;
   status.header.stamp = now();
   status.header.frame_id = config_.navigation.base_frame;
-  if (nav_.running()) {
+  if (nav_.slot.running()) {
     status.state = RobotStatus::STATE_NAVIGATING;
-  } else if (motion_.running()) {
+  } else if (motion_.slot.running()) {
     status.state = RobotStatus::STATE_MOVING;
   } else if (charging_) {
     status.state = RobotStatus::STATE_CHARGING;
@@ -350,30 +351,32 @@ MockRobotNode::makeStatus(std::lock_guard<std::mutex> & /*lock*/) const {
 }
 
 void MockRobotNode::navTick() {
-  // 骨架负责加锁/空转/取消/终态回调/反馈发布；这里只写"这一拍做什么"。
+  // 骨架负责加锁/空转/取消/终态回调/反馈发布；这里只写"这一拍推进了什么"。
   tickAction<NavigateToPose>(
-      mutex_, nav_,
-      [this](std::lock_guard<std::mutex> &lock, auto &result, auto &feedback) {
-        const double remaining = distance(pose_, nav_target_);
+      mutex_, nav_.slot,
+      [this](std::lock_guard<std::mutex> &lock) -> TickOutput<NavigateToPose> {
+        const double remaining = distance(pose_, nav_.target);
         if (remaining <= config_.navigation.goal_tolerance_m) {
-          pose_ = nav_target_; // 对齐，免得留下毫米级残差
-          result = std::make_shared<NavigateToPose::Result>();
+          pose_ = nav_.target; // 对齐，免得留下毫米级残差
+          auto result = std::make_shared<NavigateToPose::Result>();
           result->success = true;
           result->final_distance_error = static_cast<float>(remaining);
           result->message = "reached target";
-          return; // 返回非空 result 即"完成"（骨架会收尾）
+          return {result, nullptr}; // 结束（骨架会收尾）
         }
 
         // 朝目标走一步，并把朝向转向目标（模拟一个会转头的前进底盘）。
-        const double step = std::min(nav_max_speed_ * kControlPeriodS, remaining);
-        pose_.x += step * (nav_target_.x - pose_.x) / remaining;
-        pose_.y += step * (nav_target_.y - pose_.y) / remaining;
-        pose_.yaw = std::atan2(nav_target_.y - pose_.y, nav_target_.x - pose_.x);
+        const double step = std::min(nav_.max_speed * kControlPeriodS, remaining);
+        pose_.x += step * (nav_.target.x - pose_.x) / remaining;
+        pose_.y += step * (nav_.target.y - pose_.y) / remaining;
+        pose_.yaw = std::atan2(nav_.target.y - pose_.y, nav_.target.x - pose_.x);
 
-        if (++nav_feedback_divider_ >= kFeedbackEveryNTicks) {
-          nav_feedback_divider_ = 0;
-          feedback = std::make_shared<NavigateToPose::Feedback>(makeNavFeedback(lock));
+        if (++nav_.feedback_divider >= kFeedbackEveryNTicks) {
+          nav_.feedback_divider = 0;
+          return {nullptr,
+                  std::make_shared<NavigateToPose::Feedback>(makeNavFeedback(lock))};
         }
+        return {}; // 这一拍只是推进了，没有要报的
       });
 }
 
@@ -392,15 +395,15 @@ MockRobotNode::handleNavGoal(const rclcpp_action::GoalUUID & /*uuid*/,
   {
     // 锁内只碰数据：占位 + 记下目标。日志与回复都放到锁外。
     std::lock_guard<std::mutex> lock(mutex_);
-    busy = nav_.busy();
+    busy = nav_.slot.busy();
     if (!busy) {
       // reserve() 只置"占位"相位，**不置 kRunning** —— 句柄要等 accepted 回调才到，
       // 而 kRunning 一旦成立，navTick 就会拿句柄去回调框架，那个窗口里它还是空的。
       // 它顺手清掉残留的取消请求（与取消回调存在竞态，见 学习笔记.md §7.8）。
-      nav_.reserve();
-      nav_feedback_divider_ = 0;
-      nav_target_ = toPose2D(goal->target_pose);
-      nav_max_speed_ =
+      nav_.slot.reserve();
+      nav_.feedback_divider = 0;
+      nav_.target = toPose2D(goal->target_pose);
+      nav_.max_speed =
           goal->max_speed > 0.0f ? goal->max_speed : kDefaultMaxSpeedMps;
     }
   }
@@ -426,7 +429,7 @@ rclcpp_action::CancelResponse MockRobotNode::handleNavCancel(
   // 只投一位信箱，真正的"停下来 + 回 canceled()"交给控制回路。
   // 为什么不直接调 goal_handle->is_canceling()：见 学习笔记.md §7.8。
   std::lock_guard<std::mutex> lock(mutex_);
-  nav_.cancel_requested = true;
+  nav_.slot.cancel_requested = true;
   return rclcpp_action::CancelResponse::ACCEPT;
 }
 
@@ -438,9 +441,9 @@ void MockRobotNode::handleNavAccepted(
     std::lock_guard<std::mutex> lock(mutex_);
     // 句柄与相位在**同一个临界区**里改变 → kRunning 蕴含 handle 非空
     // （见 action_slot.hpp）：不靠时序，靠构造。
-    nav_.begin(goal_handle);
-    target = nav_target_;
-    speed = nav_max_speed_;
+    nav_.slot.begin(goal_handle);
+    target = nav_.target;
+    speed = nav_.max_speed;
   }
   RCLCPP_INFO(get_logger(), "开始导航 → (%.2f, %.2f)，最大速度 %.2f m/s",
               target.x, target.y, speed);
@@ -454,10 +457,10 @@ MockRobotNode::makeNavFeedback(std::lock_guard<std::mutex> & /*lock*/) const {
   feedback.current_pose.header.frame_id = config_.navigation.global_frame;
   feedback.current_pose.pose = toPoseMsg(pose_);
   feedback.distance_remaining =
-      static_cast<float>(distance(pose_, nav_target_));
+      static_cast<float>(distance(pose_, nav_.target));
   feedback.estimated_time_remaining =
-      nav_max_speed_ > 0.0
-          ? static_cast<float>(feedback.distance_remaining / nav_max_speed_)
+      nav_.max_speed > 0.0
+          ? static_cast<float>(feedback.distance_remaining / nav_.max_speed)
           : 0.0f;
   feedback.current_state = "navigating";
   return feedback;
@@ -473,12 +476,12 @@ MockRobotNode::MoveToJointPositions::Feedback MockRobotNode::makeMotionFeedback(
 
   double worst = 0.0;
   for (std::size_t i = 0; i < joint_positions_.size(); ++i) {
-    worst = std::max(worst, std::abs(motion_target_[i] - joint_positions_[i]));
+    worst = std::max(worst, std::abs(motion_.target[i] - joint_positions_[i]));
   }
   // 完成度 = 从"起始最大误差"缩到"当前最大误差"的比例；起始就是 0 视为已完成。
   feedback.completion_percentage =
-      motion_initial_error_ > 0.0
-          ? static_cast<float>(100.0 * (1.0 - worst / motion_initial_error_))
+      motion_.initial_error > 0.0
+          ? static_cast<float>(100.0 * (1.0 - worst / motion_.initial_error))
           : 100.0f;
   return feedback;
 }
@@ -486,34 +489,37 @@ MockRobotNode::MoveToJointPositions::Feedback MockRobotNode::makeMotionFeedback(
 void MockRobotNode::motionTick() {
   // 同 navTick：骨架一样，只有中间这段"推进"不同。
   tickAction<MoveToJointPositions>(
-      mutex_, motion_,
-      [this](std::lock_guard<std::mutex> &lock, auto &result, auto &feedback) {
+      mutex_, motion_.slot,
+      [this](std::lock_guard<std::mutex> &lock) -> TickOutput<MoveToJointPositions> {
         // 每个关节各自朝目标走一步。`|误差| <= 本拍行程` 时直接对齐 ——
         // 既避免过冲，也让"误差恰好为 0"不会把关节推离目标。
-        const double step = motion_max_velocity_ * kControlPeriodS;
+        const double step = motion_.max_velocity * kControlPeriodS;
         double worst = 0.0;
         for (std::size_t i = 0; i < joint_positions_.size(); ++i) {
-          const double error = motion_target_[i] - joint_positions_[i];
+          const double error = motion_.target[i] - joint_positions_[i];
           if (std::abs(error) <= step) {
-            joint_positions_[i] = motion_target_[i];
+            joint_positions_[i] = motion_.target[i];
           } else {
             joint_positions_[i] += std::copysign(step, error);
           }
-          worst = std::max(worst, std::abs(motion_target_[i] - joint_positions_[i]));
+          worst = std::max(worst, std::abs(motion_.target[i] - joint_positions_[i]));
         }
 
         if (worst <= kJointTolerance) {
-          joint_positions_ = motion_target_; // 对齐，免得留下残差
-          result = std::make_shared<MoveToJointPositions::Result>();
+          joint_positions_ = motion_.target; // 对齐，免得留下残差
+          auto result = std::make_shared<MoveToJointPositions::Result>();
           result->success = true;
           result->final_position_error = static_cast<float>(worst);
           result->message = "reached target";
-        } else if (++motion_feedback_divider_ >= kFeedbackEveryNTicks) {
-          // 反馈不必跟控制同频（同导航）：50 Hz 控制、10 Hz 反馈。
-          motion_feedback_divider_ = 0;
-          feedback =
-              std::make_shared<MoveToJointPositions::Feedback>(makeMotionFeedback(lock));
+          return {result, nullptr};
         }
+        // 反馈不必跟控制同频（同导航）：50 Hz 控制、10 Hz 反馈。
+        if (++motion_.feedback_divider >= kFeedbackEveryNTicks) {
+          motion_.feedback_divider = 0;
+          return {nullptr,
+                  std::make_shared<MoveToJointPositions::Feedback>(makeMotionFeedback(lock))};
+        }
+        return {};
       });
 }
 
@@ -532,7 +538,7 @@ rclcpp_action::GoalResponse MockRobotNode::handleMotionGoal(
   {
     // 锁内只碰数据：先在**局部**把目标拼好，全部合法才提交（不留半成品状态）。
     std::lock_guard<std::mutex> lock(mutex_);
-    busy = motion_.busy();
+    busy = motion_.slot.busy();
     if (!busy) {
       std::vector<double> target = joint_positions_; // 目标没点名的关节保持原位
       for (std::size_t k = 0; k < goal->target.name.size(); ++k) {
@@ -546,17 +552,17 @@ rclcpp_action::GoalResponse MockRobotNode::handleMotionGoal(
             goal->target.position[k];
       }
       if (!unknown) {
-        motion_target_ = std::move(target);
-        motion_max_velocity_ =
+        motion_.target = std::move(target);
+        motion_.max_velocity =
             goal->max_velocity > 0.0f ? goal->max_velocity : kDefaultJointVelocity;
         // reserve() 只置"占位"相位（理由同 handleNavGoal），并清掉残留的取消请求。
-        motion_.reserve();
-        motion_feedback_divider_ = 0;
+        motion_.slot.reserve();
+        motion_.feedback_divider = 0;
         // 起始最大误差 —— completion_percentage 的分母。
-        motion_initial_error_ = 0.0;
-        for (std::size_t i = 0; i < motion_target_.size(); ++i) {
-          motion_initial_error_ = std::max(
-              motion_initial_error_, std::abs(motion_target_[i] - joint_positions_[i]));
+        motion_.initial_error = 0.0;
+        for (std::size_t i = 0; i < motion_.target.size(); ++i) {
+          motion_.initial_error = std::max(
+              motion_.initial_error, std::abs(motion_.target[i] - joint_positions_[i]));
         }
       }
     }
@@ -580,14 +586,14 @@ rclcpp_action::CancelResponse MockRobotNode::handleMotionCancel(
     return rclcpp_action::CancelResponse::REJECT;
   }
   std::lock_guard<std::mutex> lock(mutex_);
-  motion_.cancel_requested = true;
+  motion_.slot.cancel_requested = true;
   return rclcpp_action::CancelResponse::ACCEPT;
 }
 
 void MockRobotNode::handleMotionAccepted(
     const std::shared_ptr<GoalHandleMove> goal_handle) {
   std::lock_guard<std::mutex> lock(mutex_);
-  motion_.begin(goal_handle); // 句柄与相位同时改变（理由同 handleNavAccepted）
+  motion_.slot.begin(goal_handle); // 句柄与相位同时改变（理由同 handleNavAccepted）
 }
 
 void MockRobotNode::cmdVelTick() {
