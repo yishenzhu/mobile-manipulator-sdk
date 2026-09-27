@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>robot_sdk_tests</name>
+  <version>0.1.0</version>
+  <description>
+    跨包的验收探针：验的是**行为**（忙时拒收、取消、折角、避障预检、加速度生效），
+    不是单个函数 —— 那些在 robot_sdk_core 的单元测试里。
+    放在仓库里的意义是**可复核**：谁都能跑一遍，不用再靠临时写一段。
+  </description>
+  <maintainer email="3464428214@qq.com">Robot SDK</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>robot_sdk_interfaces</exec_depend>
+  <exec_depend>robot_sdk_core</exec_depend>
+  <exec_depend>robot_sdk_sim</exec_depend>
+  <exec_depend>robot_sdk_bridge</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
