@@ -26,7 +26,7 @@ struct MotionGoal {
   double max_velocity{0.0};
 
   /// 加速度上限。**<= 0 = 由后端决定。**
-  /// 兑现情况：`motion_adapter` 读它（折算进轨迹时长）；mock 还没读。
+  /// 兑现情况：`motion_adapter` 把它折算进轨迹时长；mock 走梯形速度曲线。两侧都读。
   double max_acceleration{0.0};
 
   /// 超时秒数。**<= 0 = 用 `MotionConfig::default_timeout_s`。**

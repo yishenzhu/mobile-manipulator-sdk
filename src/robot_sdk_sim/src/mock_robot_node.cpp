@@ -491,14 +491,31 @@ void MockRobotNode::motionTick() {
   tickAction<MoveToJointPositions>(
       mutex_, motion_.slot,
       [this](std::lock_guard<std::mutex> &lock) -> TickOutput<MoveToJointPositions> {
-        // 每个关节各自朝目标走一步。`|误差| <= 本拍行程` 时直接对齐 ——
-        // 既避免过冲，也让"误差恰好为 0"不会把关节推离目标。
-        const double step = motion_.max_velocity * kControlPeriodS;
+        // 每个关节各自朝目标走一步，速度走**梯形**曲线：
+        //   · 上限是 max_velocity
+        //   · 靠近目标时按"现在开始减速、正好停住"降速，所以不会冲过头
+        //   · 速度本身每拍最多变 max_acceleration * 周期，所以起步和收尾是渐进的
+        const double dt = kControlPeriodS;
+        const double accel = motion_.max_acceleration;
+        const double dv = accel > 0.0 ? accel * dt : std::numeric_limits<double>::infinity();
         double worst = 0.0;
         for (std::size_t i = 0; i < joint_positions_.size(); ++i) {
           const double error = motion_.target[i] - joint_positions_[i];
-          if (std::abs(error) <= step) {
+          const double distance = std::abs(error);
+          // "走完这一拍就到位"和"减速正好停住"取小的，再压到速度上限。
+          double wanted = distance / dt;
+          if (accel > 0.0) {
+            wanted = std::min(wanted, std::sqrt(2.0 * accel * distance));
+          }
+          wanted = std::min(wanted, motion_.max_velocity);
+
+          double &velocity = motion_.velocities[i];
+          velocity = std::clamp(wanted, velocity - dv, velocity + dv);
+
+          const double step = velocity * dt;
+          if (distance <= step) {
             joint_positions_[i] = motion_.target[i];
+            velocity = 0.0; // 到位就停住，别让速度留到下一个目标
           } else {
             joint_positions_[i] += std::copysign(step, error);
           }
@@ -555,8 +572,11 @@ rclcpp_action::GoalResponse MockRobotNode::handleMotionGoal(
         motion_.target = std::move(target);
         motion_.max_velocity =
             goal->max_velocity > 0.0f ? goal->max_velocity : kDefaultJointVelocity;
+        // <= 0 表示"由后端决定" —— 对模拟器就是不限加速度。
+        motion_.max_acceleration = goal->max_acceleration;
         // reserve() 只置"占位"相位（理由同 handleNavGoal），并清掉残留的取消请求。
         motion_.slot.reserve();
+        motion_.velocities.assign(joint_positions_.size(), 0.0); // 从静止开始
         motion_.feedback_divider = 0;
         // 起始最大误差 —— completion_percentage 的分母。
         motion_.initial_error = 0.0;

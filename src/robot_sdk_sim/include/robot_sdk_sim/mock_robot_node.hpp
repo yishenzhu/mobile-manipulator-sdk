@@ -178,6 +178,10 @@ class MockRobotNode : public rclcpp::Node {
     /// 目标位置，与 `joint_positions_` **同序同长**；目标没点名的关节填当前值。
     std::vector<double> target;
     double max_velocity{0.0};
+    /// 加速度上限；**<= 0 = 不限**（速度可以一拍到位）。
+    double max_acceleration{0.0};
+    /// 每个关节此刻的速度 —— 加速度上限靠它限"每拍能变多少"。目标下达时清零。
+    std::vector<double> velocities;
     /// 起始最大误差 —— `completion_percentage` 的分母。
     double initial_error{0.0};
     int feedback_divider{0}; ///< 反馈降频：每 N 个控制周期发一条

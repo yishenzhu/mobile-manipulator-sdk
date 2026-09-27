@@ -46,14 +46,17 @@ int main(int argc, char** argv) {
 
   // ── ① 关节名问机器人要，别在客户代码里写死 ──
   auto joints_msg = robot.status().waitForJointStates(5s);
-  if (!joints_msg.ok()) {
-    std::printf("❌ 拿不到关节状态: %s\n", joints_msg.error().toString().c_str());
+  if (!joints_msg.ok() || joints_msg.value()->name.empty() ||
+      joints_msg.value()->position.size() != joints_msg.value()->name.size()) {
+    std::printf("❌ 拿不到关节状态: %s\n",
+                joints_msg.ok() ? "名字和位置对不上" : joints_msg.error().toString().c_str());
     robot.stop();
     spinner.join();
     rclcpp::shutdown();
     return 1;
   }
   const std::vector<std::string> joints = joints_msg.value()->name;
+  const std::vector<double> now = joints_msg.value()->position;
   std::printf("机器人有 %zu 个关节:", joints.size());
   for (const auto& name : joints) {
     std::printf(" %s", name.c_str());
@@ -62,13 +65,19 @@ int main(int argc, char** argv) {
 
   // ── ② 派发目标 + 边走边看反馈（非阻塞）──
   // 目标里**只写要动的那几个关节** —— 没点名的保持原位。
+  // 目标取"从当前位置往另一侧转 0.3"：这样反复跑，每次都是真的在动。
+  const double here = now.front();
+  const double target = here >= 0.15 ? here - 0.3 : here + 0.3;
+
   robot_sdk::MotionGoal goal;
   goal.joint_names = {joints.front()};
-  goal.positions = {0.3};
-  goal.max_velocity = 0.5;    // 每个关节各自的速度上限；<= 0 表示由后端决定
+  goal.positions = {target};
+  // 两个上限都是"每个关节各自"的（不是末端速度，见 sdk-call-flow.md §3.5）。
+  goal.max_velocity = 0.5;     // <= 0 表示由后端决定
+  goal.max_acceleration = 1.0; // 同上
   goal.timeout_s = 20.0;
 
-  std::printf("让 '%s' 转到 0.3 ...\n", goal.joint_names.front().c_str());
+  std::printf("让 '%s' 从 %.2f 转到 %.2f ...\n", goal.joint_names.front().c_str(), here, target);
   int feedback_count = 0;
   auto handle = robot.motion().moveToJointPositionsAsync(
       goal, [&feedback_count](const robot_sdk::MotionFeedback& fb) {
