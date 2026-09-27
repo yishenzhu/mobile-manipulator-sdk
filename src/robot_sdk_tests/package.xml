@@ -14,12 +14,20 @@
   <buildtool_depend>ament_python</buildtool_depend>
 
   <exec_depend>rclpy</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>robot_sdk_interfaces</exec_depend>
-  <exec_depend>robot_sdk_core</exec_depend>
+  <!-- 探针的对面是"机器人"，所以要能把它起起来。注意它们**不走 SDK** ——
+       用的是裸 action 接口（robot_sdk_interfaces），这样看机器人侧的行为更直接；
+       "SDK 用起来对不对"由 robot_sdk_examples 那三个 C++ 示例负责。 -->
   <exec_depend>robot_sdk_sim</exec_depend>
   <exec_depend>robot_sdk_bridge</exec_depend>
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
+
+  <!-- 探针的本体是 check()（不符合预期就 assert），test/ 里把它们当 pytest 跑。
+       起不来 = error，判据不对 = failure —— colcon test-result 里天生分开。 -->
+  <test_depend>python3-pytest</test_depend>
+  <test_depend>ament_index_python</test_depend>
 
   <export>
     <build_type>ament_python</build_type>

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """验收探针：忙时拒收 + 取消。
 
-    ros2 run robot_sdk_tests probe_motion            # 打适配器（默认）
-    ros2 run robot_sdk_tests probe_motion move_to_joint_positions   # 打 mock
-"""
+本体是 `check()`（不符合预期就 assert），由 test/test_probes.py 调用。
+单独跑：
 
-import sys
+    pytest src/robot_sdk_tests/test/test_probes.py -s -k motion
+"""
 
 import rclpy
 from rclpy.action import ActionClient
@@ -30,51 +30,43 @@ class Probe(Node):
         msg.max_acceleration = acceleration
         return msg
 
-    def wait(self, future):
-        rclpy.spin_until_future_complete(self, future)
+    def wait(self, future, timeout=30.0):
+        # 必须带超时：`spin_until_future_complete` 超时后返回，但 `result()` 是阻塞的，
+        # 没完成的话照样一直挂下去，看起来像对端崩了。
+        rclpy.spin_until_future_complete(self, future, timeout_sec=timeout)
+        if not future.done():
+            raise TimeoutError(f"等 {timeout:.0f} 秒没有回应")
         return future.result()
 
 
-def main():
+def check(action_name="/sdk/move_to_joint_positions"):
+    """忙时拒收 + 取消。不符合预期就抛 AssertionError / TimeoutError。"""
     rclpy.init()
-    action_name = sys.argv[1] if len(sys.argv) > 1 else "/sdk/move_to_joint_positions"
-    print(f"动作名: {action_name}")
-    probe = Probe(action_name)
-    if not probe.client.wait_for_server(timeout_sec=10.0):
-        print("❌ 等不到动作服务端")
-        return 1
+    try:
+        print(f"动作名: {action_name}")
+        probe = Probe(action_name)
+        assert probe.client.wait_for_server(timeout_sec=10.0), \
+            f"等不到动作服务端 {action_name}"
 
-    # ── ① 忙时拒收 ──
-    print("① 发一个慢目标（joint5 走 2.0 rad）...")
-    first = probe.wait(probe.client.send_goal_async(
-        probe.goal([0.5, -0.3, 0.2, 0.0, 3.0], velocity=0.5, acceleration=1.0)))
-    print(f"   第一个目标被接受: {first.accepted}")
+        # ── ① 忙时拒收 ──
+        print("① 发一个慢目标（joint5 走 2.0 rad）...")
+        first = probe.wait(probe.client.send_goal_async(
+            probe.goal([0.5, -0.3, 0.2, 0.0, 3.0], velocity=0.5, acceleration=1.0)))
+        assert first.accepted, "第一个目标该被接受"
 
-    print("② 在它跑的时候再发一个 —— 应该被拒")
-    second = probe.wait(probe.client.send_goal_async(
-        probe.goal([0.0, 0.0, 0.0, 0.0, 0.0], velocity=0.5, acceleration=1.0)))
-    print(f"   第二个目标被接受: {second.accepted}   {'✅ 拒了' if not second.accepted else '❌ 不该接受'}")
+        print("② 在它跑的时候再发一个 —— 应该被拒")
+        second = probe.wait(probe.client.send_goal_async(
+            probe.goal([0.0, 0.0, 0.0, 0.0, 0.0], velocity=0.5, acceleration=1.0)))
+        assert not second.accepted, "忙时不该接受第二个目标"
 
-    # ── ③ 取消 ──
-    print("③ 取消第一个目标")
-    cancel_response = probe.wait(first.cancel_goal_async())
-    print(f"   取消返回码数量: {len(cancel_response.goals_canceling)}")
+        # ── ③ 取消 ──
+        print("③ 取消第一个目标")
+        cancel_response = probe.wait(first.cancel_goal_async())
+        assert cancel_response.goals_canceling, "取消该被受理"
 
-    result = probe.wait(first.get_result_async())
-    wrapped = result.result
-    print(f"   终态 success={wrapped.success}  message='{wrapped.message}'")
-    ok = (not second.accepted) and (not wrapped.success)
-    print("✅ 验收通过" if ok else "❌ 验收未通过")
-
-    probe.destroy_node()
-    rclpy.shutdown()
-    return 0 if ok else 1
-
-
-def cli():
-    """console_scripts 的入口 —— 它**不看** main() 的返回值，得自己转成退出码。"""
-    sys.exit(main())
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+        wrapped = probe.wait(first.get_result_async()).result
+        print(f"   终态 success={wrapped.success}  message='{wrapped.message}'")
+        assert not wrapped.success, "取消之后不该报成功"
+        print("✅ 忙时拒收 + 取消：都对")
+    finally:
+        rclpy.shutdown()

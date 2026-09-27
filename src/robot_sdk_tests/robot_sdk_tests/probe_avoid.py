@@ -6,12 +6,10 @@
     avoid_obstacles = True  → 朝目标看一眼，发现墙挡着，**一步都不走**，报失败
     avoid_obstacles = False → 直冲，一路走到 x=6.0（穿过墙）
 
-先跑 True 再跑 False：前者不动，后者才是"撞过去"。判据就是这两条。
+本体是 `check()`（不符合预期就 assert），由 test/test_probes.py 调用。单独跑：
 
-    ros2 run robot_sdk_tests probe_avoid
+    pytest src/robot_sdk_tests/test/test_probes.py -s -k avoid
 """
-
-import sys
 
 import rclpy
 from rclpy.action import ActionClient
@@ -27,8 +25,10 @@ class Probe(Node):
         super().__init__("probe_avoid")
         self.client = ActionClient(self, NavigateToPose, action_name)
 
-    def wait(self, future):
-        rclpy.spin_until_future_complete(self, future)
+    def wait(self, future, timeout=30.0):
+        rclpy.spin_until_future_complete(self, future, timeout_sec=timeout)
+        if not future.done():
+            raise TimeoutError(f"等 {timeout:.0f} 秒没有回应")
         return future.result()
 
     def go(self, avoid):
@@ -41,47 +41,31 @@ class Probe(Node):
         goal.avoid_obstacles = avoid
 
         handle = self.wait(self.client.send_goal_async(goal))
-        if not handle.accepted:
-            return None
+        assert handle.accepted, "目标该被接受"
         return self.wait(handle.get_result_async()).result
 
     def run(self, avoid):
         result = self.go(avoid)
-        if result is None:
-            print(f"  avoid_obstacles={str(avoid):<5} → 目标被拒")
-            return None
         print(f"  avoid_obstacles={str(avoid):<5} → success={int(result.success)}  "
               f"离目标还剩 {result.final_distance_error:.2f} m  "
               f"'{result.message}'")
         return result
 
 
-def main():
+def check(action_name="/navigate_to_pose"):
+    """两种取值各验一条：true 不走，false 走到。不符合预期就 assert。"""
     rclpy.init()
-    action_name = sys.argv[1] if len(sys.argv) > 1 else "/navigate_to_pose"
-    node = Probe(action_name)
-    if not node.client.wait_for_server(timeout_sec=10.0):
-        print(f"❌ 等不到动作服务端 {action_name}")
-        return 1
+    try:
+        print(f"目标 {TARGET}（房间只到 x=5.0，这个目标在墙外）")
+        node = Probe(action_name)
+        assert node.client.wait_for_server(timeout_sec=10.0), \
+            f"等不到动作服务端 {action_name}"
 
-    print(f"目标 {TARGET}（房间只到 x=5.0，这个目标在墙外）")
-    blocked = node.run(True)
-    straight = node.run(False)
+        blocked = node.run(True)
+        assert not blocked.success, "avoid_obstacles=true 走不到就该报失败（不然就是撞过去了）"
 
-    node.destroy_node()
-    rclpy.shutdown()
-
-    # 判据：true 必须"不走"（失败），false 必须"走到了"（成功）。
-    ok = (blocked is not None and not blocked.success
-          and straight is not None and straight.success)
-    print("✅ 验收通过" if ok else "❌ 验收未通过")
-    return 0 if ok else 1
-
-
-def cli():
-    """console_scripts 的入口 —— 它**不看** main() 的返回值，得自己转成退出码。"""
-    sys.exit(main())
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+        straight = node.run(False)
+        assert straight.success, "avoid_obstacles=false 该一路走到（这个模拟器不拦）"
+        print("✅ avoid_obstacles 的两种取值：都对")
+    finally:
+        rclpy.shutdown()

@@ -5,63 +5,123 @@
 
 放在仓库里的意义是**可复核**：谁都能跑一遍，不用再靠临时写一段。
 
-## 每个探针自己会判定
+## ⚠️ 跑之前先确认**没有游离的机器人**
 
-它们会拉对象、发目标、看结果，最后打印 **✅ / ❌** 并用**退出码**说话 ——
-失败了不会假报成功（`console_scripts` 不看返回值，所以每个探针都走 `cli()` 把返回值转成退出码）。
+**症状**：探针挂住（或报"等不到服务端"）—— 看着像**对面崩了**，**其实对面好好的**。
 
-| 探针 | 验什么 | 需要谁在跑 |
+**真因**：**同名 action 服务端不止一个**。这时客户端会收到**不属于自己的** goal/cancel 回应，
+rclpy 忽略它们 —— 但在某些交错下，**该来的那个也一起丢了**，于是那个 future **永远不完成**。
+证据是 rclpy 自己打的那行警告（很容易被刷过去）：
+
+```
+Ignoring unexpected cancel response. There may be more than one action server
+for the action 'move_to_joint_positions'
+```
+
+**【量】** 用 gdb 守着**两个 mock** 跑完整个序列：**一个都没崩**，四个进程全程活着；
+但 `probe_motion` 和 `probe_wrap` 都把上面那行警告打了出来。所以"挂死"要怪**服务端不止一个**，
+不是"谁死了"。
+
+```bash
+ros2 node list          # 只该看到你要的那几个
+ros2 action list        # 或者看同名 action 有没有两个来源
+```
+
+### 为什么游离 mock 那么容易攒下来（**我踩了两轮才发现**）
+
+**`ros2 run xxx &` 的 `$!` 是 `ros2 run` 那层 Python 壳，不是那个可执行文件。**
+杀掉 `$!` 之后，里面的进程被 init 收养（`ppid` 变 1）**继续活着**。【量】实测：
+
+```
+$! = <python3 .../ros2 run ...>          ← 壳
+真正的可执行文件是它的子进程
+kill -9 $! 之后 → 可执行文件还在，ppid 变成 1
+```
+
+所以清理要么**直接起可执行文件**（`install/<pkg>/lib/<pkg>/<exe>`），要么按**可执行文件自己的 PID** 杀：
+
+```bash
+ps -eo pid,cmd | grep '[m]ock_robot_node' | awk '{print $1}' | xargs -r kill
+```
+
+> 探针每个等待都有 30 秒上限 —— 注意 `spin_until_future_complete` 超时**不代表就安全了**：
+> rclpy 的 `Future.result()` 是**阻塞**的，future 没完成的话照样挂下去。
+> 所以超时必须**明确收工**：`wait()` 抛 `TimeoutError`，`main()` 把它渲染成一行 + 退出码 1，
+> pytest 那边则是一个 failure。
+> （每个探针的 `wait()` 里就这四行。）
+
+## 怎么跑
+
+判定**只有一条路**：各探针里的 `check()` 是不符合预期就 `assert` 的本体，由 pytest 执行。
+
+```bash
+colcon test --packages-select robot_sdk_tests
+colcon test-result --test-result-base build/robot_sdk_tests
+
+# 或者只跑一条，并把探针打印的东西显出来（-s）：
+pytest src/robot_sdk_tests/test/test_probes.py -s -k motion
+```
+
+**mock 是 fixture 自己起的**（`test/conftest.py`）—— 不用再开另一个终端。
+顺手也把那个病根治了：fixture **直接起可执行文件**，`terminate()` 杀得干净。
+
+```bash
+$ colcon test && colcon test-result
+Summary: 69 tests, 0 errors, 0 failures, 0 skipped        # 65 个单元测试 + 4 个探针
+```
+
+**为什么走 pytest**：`errors` 和 `failures` **天生分开** —— "环境没起好"和"行为不对"
+一眼分得清，不用自己约定退出码。
+
+| 文件 | 打谁 | 几条 |
 |---|---|---|
-| `probe_motion` | 忙时拒收 + 取消 | mock 机器人 **或** 适配器 |
-| `probe_wrap` | 连续关节走最短的一边 | 同上，且对方**声明了** `shoulder_pan_joint` 是连续关节 |
-| `probe_avoid` | `avoid_obstacles` 的两种取值 | mock 机器人 |
-| `probe_accel` | `max_acceleration` 真的生效 | mock 机器人 **或** 适配器 |
+| `test/test_probes.py` | mock 机器人 | 4 |
+| `test/test_adapter.py` | 假下游 + 适配器 | 3 |
 
-## 打 mock 机器人（最省事）
+| 探针 | 验什么 |
+|---|---|
+| `probe_motion` | 忙时拒收 + 取消 |
+| `probe_wrap` | 连续关节走最短的一边 |
+| `probe_avoid` | `avoid_obstacles` 的两种取值 |
+| `probe_accel` | `max_acceleration` 真的生效 |
 
-```bash
-ros2 run robot_sdk_sim mock_robot_node
-```
+## 适配器那条路
 
-另一个终端：
-
-```bash
-ros2 run robot_sdk_tests probe_motion move_to_joint_positions
-ros2 run robot_sdk_tests probe_avoid
-ros2 run robot_sdk_tests probe_accel
-```
-
-## 打适配器 + 假下游
+`test_adapter.py` 打的是**适配器**：先起"假下游 + 适配器"
+（`launch/motion_chain.launch.py`），再对着 `/sdk/move_to_joint_positions`
+跑**同一个** `check()`。
 
 ```bash
-ros2 launch robot_sdk_tests motion_chain.launch.py
+pytest src/robot_sdk_tests/test/test_adapter.py -s
 ```
 
-另一个终端：
+`probe_avoid` 不在这组 —— 适配器只管关节运动，导航链路不在 `motion_chain` 里。
 
-```bash
-ros2 run robot_sdk_tests probe_motion
-ros2 run robot_sdk_tests probe_accel /sdk/move_to_joint_positions
+### 两条路**互斥**（靠 scope 保证）
+
+两个 fixture 都是 **`module` 级** —— 每个文件各起一份，**拆干净了才走下一个文件**，
+所以 mock 和适配器在时间上不重叠。
+
+**别改成 `session` 级**：那样两个会同时活到会话末尾，而**同名 action 服务端不止一个**
+时回应会串、future 可能**永远不完成**（见开头那节）—— 症状是"探针挂住，对面却好好的"。
+
+> 这条以前是靠 `conftest.py` 里一个 `ACTIVE_ROUTE` 标志去拦的。后来发现它只挡得住
+> 两件事：有人把 scope 改错、有人在一个文件里同时要两条路 —— 前者写在这儿就够了，
+> 后者按现在的结构压根发生不了。**不为未来的事留冗余代码**，删了。
+
+**收尾的兜底留着**（那些是当下就成立的，不是为将来）：
+- `wait` 超时就往下 `kill` —— **拆卸不许抛**：抛了报告里多一条 error，进程还可能没死；
+- 链路那条用 `os.killpg`（Popen 时 `start_new_session=True`）：`ros2 launch` 底下挂着
+  假下游和适配器，只 kill 它自己会把孩子们变孤儿 —— 就是那个老病根。
+
+## `probe_wrap` 和「连续关节」
+
+它验的是"连续关节走最短的一边"，所以**目标那一侧得声明哪个关节是连续的**。
+fixture 起 mock 时已经带上了：
+
+```
+--ros-args -p 'motion.continuous_joints:=[shoulder_pan_joint]'
 ```
 
-## `probe_wrap` 还要多一步
-
-它验的是"连续关节走最短的一边"，所以**得先声明哪个关节是连续的** ——
-不声明的话它走 6.7 rad（绕一整圈），探针会**如实报失败**：
-
-```bash
-# 对 mock：
-ros2 run robot_sdk_sim mock_robot_node \
-  --ros-args -p 'motion.continuous_joints:=[shoulder_pan_joint]'
-
-# 对适配器：
-ros2 run robot_sdk_bridge motion_adapter \
-  --ros-args -p 'continuous_joints:=[shoulder_pan_joint]'
-```
-
-然后：
-
-```bash
-ros2 run robot_sdk_tests probe_wrap            # 打 mock
-ros2 run robot_sdk_tests probe_wrap /sdk/move_to_joint_positions   # 打适配器
-```
+不声明的话它就老实走 6.7 rad（绕一整圈），`check()` 会**如实报失败** ——
+这不是探针的毛病，是那一侧少了个声明。（适配器那侧的参数叫 `continuous_joints`，没有 `motion.` 前缀。）

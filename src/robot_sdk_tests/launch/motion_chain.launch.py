@@ -1,16 +1,11 @@
 """把运动链路的两头拉起来：假的下游 + 适配器。探针要打的就是它俩。
 
     ros2 launch robot_sdk_tests motion_chain.launch.py
-    # 另一个终端：
-    ros2 run robot_sdk_tests probe_motion
-    ros2 run robot_sdk_tests probe_accel /sdk/move_to_joint_positions
+
+自动那边由 test/test_adapter.py 的 fixture 负责起停 —— 这里就是它起的东西。
 
 导航那条链路不在这里 —— 用 `robot_sdk_nav2` 的 `navigation.launch.py`（整栈），
 或者只起 `ros2 run robot_sdk_sim mock_robot_node`（打 mock 自己）。
-
-`probe_wrap` 需要连续关节的声明，那是个数组参数，从命令行传更清楚：
-
-    ros2 run robot_sdk_bridge motion_adapter --ros-args -p 'continuous_joints:=[shoulder_pan_joint]'
 """
 
 from launch import LaunchDescription
@@ -33,6 +28,9 @@ def generate_launch_description():
                 executable="motion_adapter",
                 name="motion_adapter",
                 output="screen",
+                # 声明成连续关节，`probe_wrap` 才有"最短的一边"可走。写在启动文件里，
+                # 起完就能用 —— 不然每个用的人还得记得自己传一遍。
+                parameters=[{"continuous_joints": ["shoulder_pan_joint"]}],
             ),
         ]
     )

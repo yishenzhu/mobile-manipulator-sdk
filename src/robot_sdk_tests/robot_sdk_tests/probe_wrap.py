@@ -5,15 +5,14 @@
 折角对了 → 只走 6.7 - 2π = 0.417 rad；没折角 → 老实走 6.7 rad。
 两者一个 0.8 秒一个 13 秒，谁也冒充不了谁。
 
-    ros2 run robot_sdk_tests probe_wrap                          # 打 mock
-    ros2 run robot_sdk_tests probe_wrap /sdk/move_to_joint_positions   # 打适配器
+前提：目标那一侧得把 `shoulder_pan_joint` 声明成连续关节，否则走的就是 6.7 ——
+`check()` 会**如实报失败**。test/conftest.py 的 fixture 起 mock 时就带上了 `-p`。
 
-前提：目标那一侧得把 `shoulder_pan_joint` 声明成连续关节，否则走的就是 6.7。
-mock 用 `--ros-args -p motion.continuous_joints:=[shoulder_pan_joint]`，
-适配器用 `--ros-args -p continuous_joints:=[shoulder_pan_joint]`。
+本体是 `check()`（不符合预期就 assert），由 test/test_probes.py 调用。单独跑：
+
+    pytest src/robot_sdk_tests/test/test_probes.py -s -k wrap
 """
 
-import sys
 import time
 
 import rclpy
@@ -25,6 +24,7 @@ from robot_sdk_interfaces.action import MoveToJointPositions
 
 JOINT = "shoulder_pan_joint"
 DELTA = 6.7      # 目标 = 当前 + 6.7 rad（绕一圈还多 0.417）
+WRAPPED = DELTA - 6.283185307179586    # 折角之后该走这么多
 
 
 class Probe(Node):
@@ -38,12 +38,18 @@ class Probe(Node):
         if JOINT in msg.name:
             self.positions.append((time.monotonic(), msg.position[msg.name.index(JOINT)]))
 
-    def wait(self, future):
-        rclpy.spin_until_future_complete(self, future)
+    def wait(self, future, timeout=30.0):
+        rclpy.spin_until_future_complete(self, future, timeout_sec=timeout)
+        if not future.done():
+            raise TimeoutError(f"等 {timeout:.0f} 秒没有回应")
         return future.result()
 
-    def current(self):
+    def current(self, timeout=30.0):
+        """等第一份关节状态 —— 也**要有上限**，否则对端不发话题就死循环。"""
+        deadline = time.monotonic() + timeout
         while len(self.positions) < 2:
+            if time.monotonic() > deadline:
+                raise TimeoutError(f"等 {timeout:.0f} 秒没有收到 /joint_states")
             rclpy.spin_once(self, timeout_sec=0.1)
         return self.positions[-1][1]
 
@@ -56,8 +62,7 @@ class Probe(Node):
         goal.max_velocity = 0.5
         goal.max_acceleration = 0.0       # 不限，让耗时只反映走了多长
         handle = self.wait(self.client.send_goal_async(goal))
-        if not handle.accepted:
-            return None
+        assert handle.accepted, "目标该被接受"
         self.wait(handle.get_result_async())
         time.sleep(0.4)
 
@@ -67,40 +72,23 @@ class Probe(Node):
         return (changes[-1] - changes[0] if changes else 0.0), window[-1][1]
 
 
-def main():
+def check(action_name="/move_to_joint_positions"):
+    """走最短的一边。不符合预期就 assert。"""
     rclpy.init()
-    action_name = sys.argv[1] if len(sys.argv) > 1 else "/move_to_joint_positions"
-    node = Probe(action_name)
-    if not node.client.wait_for_server(timeout_sec=10.0):
-        print(f"❌ 等不到动作服务端 {action_name}")
-        return 1
+    try:
+        node = Probe(action_name)
+        assert node.client.wait_for_server(timeout_sec=10.0), \
+            f"等不到动作服务端 {action_name}"
 
-    start = node.current()
-    target = start + DELTA
-    print(f"  起点 {start:.3f} rad，目标 {target:.3f} rad（差 {DELTA}）")
+        start = node.current()
+        print(f"  起点 {start:.3f} rad，目标 {start + DELTA:.3f} rad（差 {DELTA}）")
 
-    out = node.run_once(target)
-    if out is None:
-        print("  ❌ 目标被拒")
-        return 1
-    duration, end = out
-    print(f"  实际停在 {end:.3f} rad  →  走了 {end - start:+.3f} rad")
-    print(f"  运动耗时 {duration:.2f} 秒")
+        duration, end = node.run_once(start + DELTA)
+        travelled = abs(end - start)
+        print(f"  实际停在 {end:.3f} rad  →  走了 {travelled:.3f} rad，耗时 {duration:.2f} 秒")
 
-    travelled = abs(end - start)
-    wrapped = abs(travelled - (DELTA - 6.283185307179586)) < 0.05
-    print("  → " + ("✅ 折角生效（走了 0.417，没绕一圈）" if wrapped
-                    else "❌ 没折角（老实走了 6.7）"))
-
-    node.destroy_node()
-    rclpy.shutdown()
-    return 0 if wrapped else 1
-
-
-def cli():
-    """console_scripts 的入口 —— 它**不看** main() 的返回值，得自己转成退出码。"""
-    sys.exit(main())
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+        assert abs(travelled - WRAPPED) < 0.05, \
+            f"该走 {WRAPPED:.3f} rad（最短的一边），实际走了 {travelled:.3f}"
+        print("✅ 折角生效：走的是最短的一边")
+    finally:
+        rclpy.shutdown()
