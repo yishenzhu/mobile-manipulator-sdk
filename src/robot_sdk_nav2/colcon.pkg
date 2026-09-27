@@ -1,0 +1,3 @@
+{
+  "cmake-args": ["--no-warn-unused-cli"]
+}

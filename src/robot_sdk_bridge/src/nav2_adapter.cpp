@@ -211,12 +211,20 @@ class Nav2Adapter : public rclcpp::Node {
     }
 
     // 终态**由下游决定**，本节点不自己判。
+    // ⚠️ 不能只看 error_code：下游 abort 时 error_code 可能是 0（NONE）——
+    //    那样"被中止的目标"会被报成 success。终态码说什么就是什么。
     if (wrapped.code == rclcpp_action::ResultCode::CANCELED) {
       result->success = false;
       if (result->message.empty()) {
         result->message = "导航被取消";
       }
       sdk_handle->canceled(result);
+    } else if (wrapped.code == rclcpp_action::ResultCode::ABORTED && result->success) {
+      result->success = false;
+      if (result->message.empty()) {
+        result->message = "导航被中止";
+      }
+      sdk_handle->abort(result);
     } else if (result->success) {
       sdk_handle->succeed(result);
     } else {
