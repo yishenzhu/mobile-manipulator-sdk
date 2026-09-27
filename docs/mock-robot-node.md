@@ -745,7 +745,7 @@ ws/src/robot_sdk_sim/
 ws/src/robot_sdk_core/          ← 契约（config.hpp 定义上面所有名字）
 │   └── detail/action_slot.hpp  ← `ActionSlot`（三态 + 取消信箱）
 │                                  mock 与适配层**都**用它，所以它住在 core
-ws/src/robot_sdk_examples/      ← **客户代码长什么样**：hello_robot / demo_navigation
+ws/src/robot_sdk_examples/      ← **客户代码长什么样**：hello_robot / demo_navigation / demo_motion
 ws/src/robot_sdk_bridge/        ← 适配层：SDK 动作 → Nav2 / FollowJointTrajectory
 ws/学习笔记.md                   ← 逐次踩坑的历史与推导过程
 ws/docs/mock-robot-node.md      ← 本文件（mock 的内部设计）

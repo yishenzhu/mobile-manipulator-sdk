@@ -43,6 +43,9 @@ class StatusAPI {
 
   std::optional<JointStatePtr> jointStates() const;
 
+  /// 阻塞等到第一条关节状态 —— 搞不清机器人有哪些关节时用它（同 `waitForStatus`）。
+  Result<JointStatePtr> waitForJointStates(std::chrono::duration<double> timeout);
+
   bool hasStatus() const { return status_cache_.hasValue(); }
 
   /// 阻塞等待一次状态；拿不到时返回带原因的 Error（与 PerceptionAPI 的等待同一形状）。

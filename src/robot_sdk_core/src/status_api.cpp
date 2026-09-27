@@ -70,6 +70,15 @@ Result<StatusAPI::RobotStatusPtr> StatusAPI::waitForStatus(
   return *value;
 }
 
+Result<StatusAPI::JointStatePtr> StatusAPI::waitForJointStates(
+    std::chrono::duration<double> timeout) {
+  auto value = joint_state_cache_.waitForValue(timeout);
+  if (!value) {
+    return Error::Timeout("no joint states received within timeout");
+  }
+  return *value;
+}
+
 Result<StatusAPI::RobotStatus> StatusAPI::queryStatus(std::chrono::duration<double> timeout) {
   if (!status_client_->wait_for_service(timeout)) {
     return Error::Unavailable("status service '" + config_.get_status_service +

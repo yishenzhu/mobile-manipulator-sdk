@@ -116,12 +116,13 @@ class MotionAdapter : public rclcpp::Node {
           }
         }
         slot_.reserve(); // 占位：下游句柄要等回应回调才到
-        start_positions_.clear();
-        for (int index : indices) {
-          start_positions_.push_back(joint_positions_[index]);
+        // 补成**整条**关节列表：`FollowJointTrajectory` 默认不收部分关节的目标，
+        // 而 SDK 的语义是"目标没点名的关节保持原位" —— 那些关节的目标就是当前值。
+        target_positions_ = joint_positions_;
+        for (std::size_t i = 0; i < indices.size(); ++i) {
+          target_positions_[static_cast<std::size_t>(indices[i])] = target.position[i];
         }
-        target_positions_ = target.position;
-        initial_error_ = maxError(start_positions_, target_positions_);
+        initial_error_ = maxError(joint_positions_, target_positions_);
       }
     }
     if (busy) {
@@ -175,28 +176,31 @@ class MotionAdapter : public rclcpp::Node {
 
   /// 一个目标点 → 一条两点轨迹（当前 → 目标）。
   /// 时长取**所有关节里最慢的那个**，于是所有关节同时到位。
+  /// 两个端点都是**整条**关节列表（下游只收整条，补全在 `handleGoal` 里做了）。
   void buildTrajectory(const SdkAction::Goal& goal, JtcAction::Goal& out) {
-    std::vector<double> start;
+    std::vector<double> from;
+    std::vector<double> to;
     {
       std::lock_guard<std::mutex> lock(mutex_);
-      start = start_positions_;
+      from = joint_positions_;
+      to = target_positions_;
+      out.trajectory.joint_names = joint_names_;
     }
 
     const double velocity =
         goal.max_velocity > 0.0F ? goal.max_velocity : default_max_velocity_;
     double duration = kMinMoveTimeS;
-    for (std::size_t i = 0; i < goal.target.position.size(); ++i) {
-      const double distance = goal.target.position[i] - start[i];
-      duration = std::max(duration, moveTime(distance, velocity, goal.max_acceleration));
+    for (std::size_t i = 0; i < to.size(); ++i) {
+      duration =
+          std::max(duration, moveTime(to[i] - from[i], velocity, goal.max_acceleration));
     }
 
-    out.trajectory.joint_names = goal.target.name;
     out.trajectory.header.stamp = now();
 
     out.trajectory.points.resize(2);
-    out.trajectory.points[0].positions = start;
+    out.trajectory.points[0].positions = from;
     out.trajectory.points[0].time_from_start = toDuration(0.0);
-    out.trajectory.points[1].positions = goal.target.position;
+    out.trajectory.points[1].positions = to;
     out.trajectory.points[1].time_from_start = toDuration(duration);
   }
 
@@ -346,10 +350,8 @@ class MotionAdapter : public rclcpp::Node {
   std::shared_ptr<JtcGoalHandle> jtc_handle_;
   std::vector<std::string> joint_names_;
   std::vector<double> joint_positions_;
-  /// 目标下达那一刻的各关节角 —— 轨迹起点（每条轨迹只发一次）。
-  std::vector<double> start_positions_;
-  /// 目标位置 —— 完成度的分子拿它算。**不能用下游反馈里的 `desired`**：
-  /// 那是"此刻应该在哪"，追踪正常时它和实际位置几乎重合，误差恒为 0。
+  /// 目标位置（**整条**关节列表，目标没点名的关节填当前值）—— 轨迹终点和完成度的分子都用它。
+  /// **不能用下游反馈里的 `desired`**：那是"此刻应该在哪"，追踪正常时它和实际位置几乎重合。
   std::vector<double> target_positions_;
   /// 目标下达那一刻的最大误差 —— 完成度的分母。
   double initial_error_ = 0.0;

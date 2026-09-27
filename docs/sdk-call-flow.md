@@ -395,6 +395,17 @@ config.navigation.action_name = "sdk/navigate_to_pose";   // 就这一行
 而不是最终目标。**这一点很关键**：正是它把适配器里"拿 `desired` 算完成度"的错揪了出来
 （那样算误差恒为 0，完成度会一直是 100%）。
 
+**跑起来要三个终端**（下游 + 适配器 + 客户）：
+
+```bash
+ros2 run robot_sdk_sim joint_trajectory_mock    # 假的下游 —— 真机上是 ros2_control
+ros2 run robot_sdk_bridge motion_adapter        # 适配器
+ros2 run robot_sdk_examples demo_motion sdk/move_to_joint_positions   # 客户代码
+```
+
+> `demo_motion` 对着 **mock 机器人**跑时要**去掉**最后那个动作名参数 ——
+> mock 直接提供 `move_to_joint_positions`，不走适配器。
+
 ---
 
 ## 4. `spin()` / 执行器 / 线程池（最容易搞错的部分）
@@ -653,6 +664,8 @@ void cancel();                                                     // 请求取�
 std::optional<RobotStatusPtr> status() const;                      // 最新快照
 Result<RobotStatusPtr> waitForStatus(Duration timeout);            // 等一条来
 Result<RobotStatus> queryStatus(Duration timeout);                 // 服务：问一次（按值）
+std::optional<JointStatePtr> jointStates() const;                  // 最新一帧关节状态
+Result<JointStatePtr> waitForJointStates(Duration timeout);        // 等一帧来（搞不清有哪些关节时用它）
 bool isHealthy() const;      // 缓存里**最新那条**健康吗（无故障 + 不在错误态 + 无急停）
 float batteryPercentage() const;                                   // 读消息里的电量字段
 
