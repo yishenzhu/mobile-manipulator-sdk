@@ -84,13 +84,12 @@ class MockRobotNode : public rclcpp::Node {
   /// 组装一条运动反馈。参数 `lock` 是凭证（同 `makeStatus`）。
   MoveToJointPositions::Feedback makeMotionFeedback(std::lock_guard<std::mutex>& lock) const;
 
-  void publishFrames();
-  void publishJoints();
+  void publishFrames(const rclcpp::Time& stamp);
+  void publishJoints(const rclcpp::Time& stamp);
 
   /// 发布板载传感器（激光 + IMU + 相机），内部降到 10 Hz。
-  /// 它只负责**节奏**和**发布**；每一路的数据在下面的 `makeXxx` 里组装。
-  /// 与状态、关节一样：**锁内取数、锁外发布**（本文档 §4.3 纪律 1）。
-  void publishSensors();
+  /// 只负责节奏和发布；每一路的数据在下面的 `makeXxx` 里组装。
+  void publishSensors(const rclcpp::Time& stamp);
 
   /// 组装各路传感器数据 —— 与 `makeStatus` / `makeNavFeedback` 同一模式：
   /// 在**锁内**被调用，`lock` 是**凭证**（参数不命名 = 一眼看出它不是数据）。

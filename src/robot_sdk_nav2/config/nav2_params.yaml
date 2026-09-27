@@ -1,16 +1,6 @@
-# 让 Nav2 跑在 **mock 机器人** 上。
-#
-# 和被控对象（mock）配合的三条约定：
-#   · 帧名 map / odom / base_footprint —— mock 的 TF 就是这么广播的
-#   · 输入 /scan（mock 发的激光，frame = laser_frame）
-#   · 输出 /cmd_vel（mock 订阅的底盘指令）—— 所以这里**不起** velocity_smoother
-#     和 collision_monitor，让 controller_server 直接发 cmd_vel
-#
-# 和"标准 Gazebo 部署"的三处不同：
-#   1. use_sim_time: false —— 没有 Gazebo 时钟
-#   2. 全局代价地图**去掉 static_layer**、改成滚动窗口 —— 本部署没有地图，
-#      障碍物全靠激光实时建
-#   3. 只起最小节点集（规划 / 控制 / 行为 / 行为树）
+# 让 Nav2 跑在 mock 机器人上。
+# 帧名 map / odom / base_footprint，输入 /scan，输出 /cmd_vel（所以不起 velocity_smoother
+# 和 collision_monitor，让 controller_server 直接发 cmd_vel）。
 
 bt_navigator:
   ros__parameters:
@@ -19,7 +9,8 @@ bt_navigator:
     robot_base_frame: base_footprint
     odom_topic: /odom
     bt_loop_duration: 10
-    default_server_timeout: 20
+    # 单位是**毫秒**。参考那份写 20（＝0.02 s），发目标常常等不到回应。
+    default_server_timeout: 200
     navigators: ["navigate_to_pose"]
     navigate_to_pose:
       plugin: "nav2_bt_navigator::NavigateToPoseNavigator"
@@ -55,12 +46,18 @@ controller_server:
       min_approach_linear_velocity: 0.05
       approach_velocity_scaling_dist: 0.4
       use_regulated_linear_velocity_scaling: true
+      # 原地转身速度实际是 rotate_to_heading_angular_vel 被 max_angular_accel ÷ 控制频率
+      # 卡住后的结果（RPP 每拍从零重算）。默认 3.2 在 20 Hz 下只给出 0.16 rad/s：转 143°
+      # 要 15 s，会被 progress_checker（10 s / 0.3 m）判死 —— 这两个值必须一起给够。
+      rotate_to_heading_angular_vel: 1.0
+      max_angular_accel: 20.0
 
 local_costmap:
   local_costmap:
     ros__parameters:
       use_sim_time: false
-      update_frequency: 5.0
+      # 控制器要等这张图"当前"才肯算下一拍 —— 它的频率实际上被这里卡着。
+      update_frequency: 20.0
       publish_frequency: 2.0
       global_frame: odom
       robot_base_frame: base_footprint

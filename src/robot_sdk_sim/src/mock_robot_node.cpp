@@ -610,14 +610,18 @@ void MockRobotNode::cmdVelTick() {
 }
 
 void MockRobotNode::controlTick() {
-  // cmdVelTick 和 navTick 都能改位姿 —— 接 Nav2 时用前者，用本节点的导航服务端时用后者，
-  // 不要同时驱动。
+  // cmdVelTick 和 navTick 都能改位姿 —— 接 Nav2 时用前者，用本节点的导航服务端时用后者。
   cmdVelTick();
-  navTick();      // 先推进导航，
-  motionTick();   // 再推进关节运动，
-  publishJoints();
-  publishFrames();
-  publishSensors(); // 内部降频到 10 Hz —— 传感器不必跟 50 Hz 控制同频
+  navTick();
+  motionTick();
+
+  // 一拍**只取一次时间**：同一拍产生的关节 / TF / 传感器必须共享时间戳。
+  // 各打各的 `now()` 的话，下游按时间对齐时会发现"同一拍的数据时间对不上"，
+  // Nav2 的 message filter 就会把激光丢掉。
+  const rclcpp::Time stamp = now();
+  publishJoints(stamp);
+  publishFrames(stamp);
+  publishSensors(stamp); // 内部降频到 10 Hz
 }
 
 void MockRobotNode::statusTick() {
@@ -645,7 +649,7 @@ void MockRobotNode::statusTick() {
   status_pub_->publish(status); // 锁外做 I/O
 }
 
-void MockRobotNode::publishFrames() {
+void MockRobotNode::publishFrames(const rclcpp::Time &stamp) {
   Pose2D pose;
   {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -654,7 +658,6 @@ void MockRobotNode::publishFrames() {
   // 锁外做 I/O —— sendTransform 会走 DDS，不该占着锁（同 publishJoints）。
   // 这里是模拟机器人的"真值"：它假装 odom 与 global_frame 重合，
   // 于是把位姿直接发成 odom -> base 的变换。
-  const auto stamp = now();
   tf_broadcaster_->sendTransform(makeTransform(
       stamp, config_.navigation.global_frame, "odom", 0.0, 0.0, 0.0, 0.0));
   tf_broadcaster_->sendTransform(
@@ -662,9 +665,9 @@ void MockRobotNode::publishFrames() {
                     pose.yaw));
 }
 
-void MockRobotNode::publishJoints() {
+void MockRobotNode::publishJoints(const rclcpp::Time &stamp) {
   sensor_msgs::msg::JointState msg;
-  msg.header.stamp = now();
+  msg.header.stamp = stamp;
   {
     std::lock_guard<std::mutex> lock(mutex_);
     msg.name = joint_names_;
@@ -675,7 +678,7 @@ void MockRobotNode::publishJoints() {
   joint_pub_->publish(msg);
 }
 
-void MockRobotNode::publishSensors() {
+void MockRobotNode::publishSensors(const rclcpp::Time &stamp) {
   sensor_msgs::msg::LaserScan scan;
   sensor_msgs::msg::Imu imu;
   sensor_msgs::msg::CameraInfo camera_info;
@@ -698,7 +701,6 @@ void MockRobotNode::publishSensors() {
     }
     sensor_divider_ = 0;
 
-    const auto stamp = now();
     scan = makeScan(lock, stamp);
     // 角速度要拿"上一拍"差分，所以先把旧值传进去，**再**更新它。
     imu = makeImu(lock, stamp, last_yaw_);
