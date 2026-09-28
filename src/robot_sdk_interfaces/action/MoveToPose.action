@@ -1,0 +1,24 @@
+# 硬件无关的笛卡尔空间运动目标：把末端执行器挪到某个位姿。
+# 逆解与规划是**执行侧**的事（在那边就是 MoveIt），这里只表达"我想让末端到哪儿"。
+
+# Goal
+geometry_msgs/PoseStamped target_pose
+
+# true = 朝向随你（规划器自己在可行解里挑）；false = 照 target_pose 里的姿态。
+# ⚠️ 名字带"任意"是为了让**默认值那侧**站着对的一方：goal 里 bool 默认 false，
+#    而"客户填了姿态就该用它"才是符合直觉的默认。
+bool any_orientation
+
+# 0 = 不指定，由执行侧按自己的上限决定（和 MoveToJointPositions 同一条约定）。
+float32 max_velocity
+---
+# Result
+bool success
+# 停稳后离目标差多少：位置（米）、姿态（弧度）。any_orientation 为真时后者恒为 0。
+float32 final_position_error
+float32 final_orientation_error
+string message
+---
+# Feedback
+geometry_msgs/PoseStamped current_pose
+float32 completion_percentage

@@ -41,6 +41,12 @@ struct NavigationConfig {
 struct MotionConfig {
   /// 后端 action 名。⚠️ 必须与 `NavigationConfig::action_name` **不同**（同上）。
   std::string action_name{"move_to_joint_positions"};
+  /// 笛卡尔目标的后端 action 名。和上面是**两个不同类型的 action**，
+  /// 所以名字也必须不同（理由同上：同名会让 send_goal 服务话题类型撞车）。
+  std::string pose_action_name{"move_to_pose"};
+  /// 笛卡尔目标的默认坐标系：客户没给 `header.frame_id` 时用它。
+  /// 选 `map` 是因为客户想的是"世界上那一点" —— 用 base_link 的话底盘一挪目标就跟着跑。
+  std::string pose_frame{"map"};
   std::vector<std::string> joint_names{};
   double default_timeout_s{30.0};
   std::map<std::string, std::vector<double>> named_targets{};

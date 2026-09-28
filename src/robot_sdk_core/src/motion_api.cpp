@@ -16,6 +16,9 @@ MotionAPI::MotionAPI(const rclcpp::Node::SharedPtr& node,
     : node_(node), config_(config) {
   // 相对动作名 + 显式回调组（决定目标/结果回调落在哪条车道）。
   client_ = rclcpp_action::create_client<Action>(node_, config_.action_name, callback_group);
+  // 笛卡尔目标是**另一个** action，所以另起一个 client（同名会让 send_goal 话题类型撞车）。
+  pose_client_ =
+      rclcpp_action::create_client<PoseAction>(node_, config_.pose_action_name, callback_group);
 }
 
 bool MotionAPI::serverAvailable(std::chrono::duration<double> timeout) {
@@ -102,6 +105,65 @@ Result<MotionResult> MotionAPI::moveToJointPositions(const MotionGoal& goal) {
   return result;
 }
 
+std::shared_ptr<ActionHandle<MotionAPI::PoseAction>> MotionAPI::moveToPoseAsync(
+    const PoseGoal& goal, PoseFeedbackCallback on_feedback) {
+  auto handle = std::make_shared<ActionHandle<PoseAction>>();
+  if (on_feedback) {
+    handle->onFeedback([on_feedback](ActionHandle<PoseAction>::FeedbackSharedPtr msg) {
+      PoseFeedback feedback;
+      feedback.current_pose = msg->current_pose;
+      feedback.completion_percentage = msg->completion_percentage;
+      on_feedback(feedback);
+    });
+  }
+
+  PoseAction::Goal message;
+  message.target_pose = goal.target_pose;
+  if (message.target_pose.header.frame_id.empty()) {
+    // 客户没说坐标系就按配置的默认来 —— 空白 frame_id 谁也解算不了。
+    message.target_pose.header.frame_id = config_.pose_frame;
+  }
+  message.any_orientation = goal.any_orientation;
+  message.max_velocity = static_cast<float>(goal.max_velocity);
+
+  rclcpp_action::Client<PoseAction>::SendGoalOptions options;
+  options.feedback_callback = [handle](typename ActionHandle<PoseAction>::GoalHandle::SharedPtr,
+                                       ActionHandle<PoseAction>::FeedbackSharedPtr msg) {
+    handle->dispatchFeedback(std::move(msg));
+  };
+
+  handle->bind(pose_client_->async_send_goal(message, options), pose_client_);
+
+  std::lock_guard<std::mutex> lock(handles_mutex_);
+  active_pose_handles_.push_back(handle);
+  return handle;
+}
+
+Result<PoseResult> MotionAPI::moveToPose(const PoseGoal& goal) {
+  const double timeout = goal.timeout_s > 0.0 ? goal.timeout_s : config_.default_timeout_s;
+
+  auto handle = moveToPoseAsync(goal);
+  auto wrapped = handle->wait(std::chrono::duration<double>(timeout));
+  if (!wrapped.ok()) {
+    return wrapped.error();
+  }
+
+  PoseResult result;
+  if (wrapped.value().result) {
+    result.success = wrapped.value().result->success;
+    result.final_position_error = wrapped.value().result->final_position_error;
+    result.final_orientation_error = wrapped.value().result->final_orientation_error;
+    result.message = wrapped.value().result->message;
+  }
+  if (wrapped.value().code != rclcpp_action::ResultCode::SUCCEEDED) {
+    result.success = false;
+    if (result.message.empty()) {
+      result.message = "goal terminated with code " + resultCodeToString(wrapped.value().code);
+    }
+  }
+  return result;
+}
+
 Result<MotionResult> MotionAPI::moveToNamedTarget(const std::string& name) {
   const auto it = config_.named_targets.find(name);
   if (it == config_.named_targets.end()) {
@@ -141,15 +203,23 @@ void MotionAPI::cancelAll() {
   // 与 NavigationAPI::cancelAll() 同一模式：
   // 锁内只做"清理登记 + 拷出句柄"，取消动作放锁外（cancel() 含 I/O）。
   std::vector<std::shared_ptr<ActionHandle<Action>>> handles;
+  std::vector<std::shared_ptr<ActionHandle<PoseAction>>> pose_handles;
   {
     std::lock_guard<std::mutex> lock(handles_mutex_);
 
     // 清掉已过期的登记，否则这个向量只增不减。
     active_handles_.erase(std::remove_if(active_handles_.begin(), active_handles_.end(),
-                                        [](const std::weak_ptr<ActionHandle<Action>>& weak) {
-                                          return weak.expired();
-                                        }),
+                                         [](const std::weak_ptr<ActionHandle<Action>>& weak) {
+                                           return weak.expired();
+                                         }),
                           active_handles_.end());
+    // 笛卡尔那条也要清 —— 不然"取消全部"会漏掉正在跑的位姿目标。
+    active_pose_handles_.erase(
+        std::remove_if(active_pose_handles_.begin(), active_pose_handles_.end(),
+                       [](const std::weak_ptr<ActionHandle<PoseAction>>& weak) {
+                         return weak.expired();
+                       }),
+        active_pose_handles_.end());
 
     // lock() 拿到强引用 → 对象由 handles 保活，锁外使用安全。
     for (auto& weak : active_handles_) {
@@ -157,9 +227,17 @@ void MotionAPI::cancelAll() {
         handles.push_back(std::move(handle));
       }
     }
+    for (auto& weak : active_pose_handles_) {
+      if (auto handle = weak.lock()) {
+        pose_handles.push_back(std::move(handle));
+      }
+    }
   }
 
   for (auto& handle : handles) {
+    handle->cancel();
+  }
+  for (auto& handle : pose_handles) {
     handle->cancel();
   }
 }

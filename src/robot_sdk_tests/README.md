@@ -116,8 +116,13 @@ pytest src/robot_sdk_tests/test/test_navigation.py -s
 两处讲究：
 
 - **先回原点**：不然"走了多远"取决于上一摊把机器人留在哪（`probe_accel` 栽过一次）；
-- **就绪条件不是"服务端在"**：Nav2 的动作服务端在节点构造时就 advertise 了，那**不代表**
-  生命周期激活完成 —— 要等**代价地图**发出来（planner/controller 激活之后才会发）。
+- **就绪条件不是"服务端在"，也不是"代价地图有帧"**：Nav2 的动作服务端在节点构造时就
+  advertise 了，那**不代表**生命周期激活完成；而**代价地图的帧是 latch 的**
+  （`TRANSIENT_LOCAL`），它早于全栈就绪就已经存在了 —— 拿它当信号会**提前放行**，
+  探针就会对着一个还在 activating 的 `bt_navigator` 发目标
+  （实测：`Action server is inactive. Rejecting the goal.` → 整栈 abort）。
+  **真判据是问生命周期**：`/bt_navigator/get_state` 到 `active` 才算"能干活"。
+  （另一头也踩过：用默认的 `VOLATILE` QoS 订 latch 话题，会**一帧都收不到**。）
 
 整栈有十来个节点，日志能把 pytest 的输出淹掉，所以 fixture 把它**写进临时文件**，
 真出事时 assert 的消息里带着那个路径。

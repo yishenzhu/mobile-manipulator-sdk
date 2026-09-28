@@ -59,6 +59,10 @@ RobotConfig RobotConfig::fromNode(rclcpp::Node &node) {
 
   cfg.motion.action_name = declareAndGet<std::string>(
       node, "motion.action_name", cfg.motion.action_name);
+  cfg.motion.pose_action_name = declareAndGet<std::string>(
+      node, "motion.pose_action_name", cfg.motion.pose_action_name);
+  cfg.motion.pose_frame = declareAndGet<std::string>(
+      node, "motion.pose_frame", cfg.motion.pose_frame);
   cfg.motion.joint_names =
       declareAndGet<std::vector<std::string>>(node, "motion.joint_names", cfg.motion.joint_names);
   cfg.motion.default_timeout_s = declareAndGet<double>(

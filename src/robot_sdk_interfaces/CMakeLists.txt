@@ -12,6 +12,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
     "srv/GetRobotStatus.srv" 
     "action/NavigateToPose.action"
     "action/MoveToJointPositions.action"
+    "action/MoveToPose.action"
     DEPENDENCIES std_msgs sensor_msgs geometry_msgs
 )
 

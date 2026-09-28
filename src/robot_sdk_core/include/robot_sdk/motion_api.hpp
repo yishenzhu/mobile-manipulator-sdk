@@ -10,6 +10,9 @@
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
 #include <robot_sdk_interfaces/action/move_to_joint_positions.hpp>
+#include <robot_sdk_interfaces/action/move_to_pose.hpp>
+
+#include <geometry_msgs/msg/pose_stamped.hpp>
 
 #include "robot_sdk/action_handle.hpp"
 #include "robot_sdk/config.hpp"
@@ -48,6 +51,38 @@ struct MotionFeedback {
   double completion_percentage{0.0};
 };
 
+/// 笛卡尔空间目标：把末端执行器挪到某个位姿。
+/// 逆解与规划是**执行侧**的事（那边就是 MoveIt），这里只表达"我想让末端到哪儿"。
+struct PoseGoal {
+  /// 坐标系由 `header.frame_id` 说 —— 默认 `map`：客户想的是"世界上那一点"，
+  /// 用 `base_link` 的话底盘一挪目标就跟着跑。
+  geometry_msgs::msg::PoseStamped target_pose{};
+
+  /// true = 朝向随你（规划器自己在可行解里挑）；false = 照 `target_pose` 里的姿态。
+  /// 想"保持当前姿态"不用这个开关：从 `TransformManager::lookupTransform()` 读现在的填进来即可。
+  bool any_orientation{false};
+
+  /// 速度上限。**<= 0 = 不指定**（同 `MotionGoal`）。
+  double max_velocity{0.0};
+
+  /// 超时秒数。**<= 0 = 用 `MotionConfig::default_timeout_s`。**
+  double timeout_s{0.0};
+};
+
+struct PoseResult {
+  bool success{false};
+  double final_position_error{0.0};
+  /// 姿态误差（弧度）。`any_orientation` 为真时**恒为 0** —— 不是"没测"，
+  /// 是本来就没要求（区别写进了 action 的字段注释）。
+  double final_orientation_error{0.0};
+  std::string message{};
+};
+
+struct PoseFeedback {
+  geometry_msgs::msg::PoseStamped current_pose{};
+  double completion_percentage{0.0};
+};
+
 /// 关节空间运动，含机械臂与夹爪。
 ///
 /// 对准的是 **SDK 自己的运动 action**；实际部署时由一层适配器转到
@@ -56,6 +91,8 @@ class MotionAPI {
  public:
   using Action = robot_sdk_interfaces::action::MoveToJointPositions;
   using FeedbackCallback = std::function<void(const MotionFeedback&)>;
+  using PoseAction = robot_sdk_interfaces::action::MoveToPose;
+  using PoseFeedbackCallback = std::function<void(const PoseFeedback&)>;
 
   MotionAPI(const rclcpp::Node::SharedPtr& node,
             const rclcpp::CallbackGroup::SharedPtr& callback_group, const MotionConfig& config);
@@ -66,6 +103,13 @@ class MotionAPI {
       const MotionGoal& goal, FeedbackCallback on_feedback = nullptr);
 
   Result<MotionResult> moveToJointPositions(const MotionGoal& goal);
+
+  /// 笛卡尔空间运动：把末端执行器挪到 `goal.target_pose`。
+  /// 走的是 `MotionConfig::pose_action_name` 那条后端 —— 和关节运动是**两个** action。
+  std::shared_ptr<ActionHandle<PoseAction>> moveToPoseAsync(
+      const PoseGoal& goal, PoseFeedbackCallback on_feedback = nullptr);
+
+  Result<PoseResult> moveToPose(const PoseGoal& goal);
 
   /// 移动到 `MotionConfig::named_targets` 里声明的具名位姿（如 "home"）。
   ///
@@ -88,9 +132,11 @@ class MotionAPI {
   rclcpp::Node::SharedPtr node_;
   MotionConfig config_;
   std::shared_ptr<rclcpp_action::Client<Action>> client_;
+  std::shared_ptr<rclcpp_action::Client<PoseAction>> pose_client_;
 
   mutable std::mutex handles_mutex_;
   std::vector<std::weak_ptr<ActionHandle<Action>>> active_handles_;
+  std::vector<std::weak_ptr<ActionHandle<PoseAction>>> active_pose_handles_;
 };
 
 }  // namespace robot_sdk

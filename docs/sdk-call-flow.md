@@ -759,6 +759,22 @@ const T& valueOr(const T& fallback) const;// 失败时给兜底值
 | # | 事项 | 为什么 / 怎么做 | 相关 |
 |---|---|---|---|
 | 1 | **SDK 加笛卡尔目标支持** | 现在只有 `MoveToJointPositions`（点名关节角）。要"把夹爪移到 (x, y, z)"，得先有这个目标类型 —— 顺带也需要 TF 反馈 | §3.5 |
+  **已定下的形状**（2026-09 一轮问答定的，别再重议）：
+
+  - **`target_pose: PoseStamped`** —— 坐标系放 `header.frame_id`，**默认 `map`**（客户想的是"世界上那一点"；
+    用 `base_link` 的话底盘一挪目标就跟着跑）。
+  - **`any_orientation`** —— true = **朝向随你**（规划器在可行解里挑）；false = 照 `target_pose` 里的姿态。
+    名字带"任意"是为了让**默认那侧**站着对的一方：goal 里 bool 默认 false，而"客户填了姿态就该用它"才符合直觉。
+    （写成 `constrain_orientation` 的话，默认等于"填了也不用"。）
+  - **`max_velocity`** —— 0 = 不指定，由执行侧按自己的上限决定（和 `MoveToJointPositions` 同一条约定）。
+  - **不把 MoveIt 的复杂度漏进契约**：区域 / 容差 / 权重都是**规划器的旋钮**，客户说的是"到那儿"。
+    以后真要加容差是向后兼容的，不亏。
+  - **"保持当前姿态"不需要新字段** —— 客户从 `TransformManager::lookupTransform()` 读现在的填进去即可。
+
+  **落地进度**：`MoveToPose.action` ✅ —— 剩下：`MotionConfig::pose_action_name` →
+  `MotionAPI::moveToPose()` → `moveit_adapter`（Pose → `moveit_msgs/Constraints`）→
+  假的 `move_group` 替身（先打通链路，和当初 `joint_trajectory_mock` 一样）→ `probe_pose`。
+
 | 2 | **MoveIt 适配器** | 有了笛卡尔目标之后，逆解与规划就是 MoveIt 的活。它**同样讲 `FollowJointTrajectory`**，所以客户代码不用动，照着 `motion_adapter` 再写一个即可 | §3.5 |
 
 **已办**：

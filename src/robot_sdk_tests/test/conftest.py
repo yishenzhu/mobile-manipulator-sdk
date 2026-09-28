@@ -19,7 +19,7 @@ import time
 import pytest
 import rclpy
 from ament_index_python.packages import get_package_prefix, get_package_share_directory
-from nav_msgs.msg import OccupancyGrid
+from lifecycle_msgs.srv import GetState
 from rclpy.action import ActionClient
 from sensor_msgs.msg import JointState
 
@@ -113,13 +113,31 @@ def navigation():
             assert client.wait_for_server(timeout_sec=60.0), \
                 f"等不到 {ADAPTER_NAVIGATION}（日志：{log.name}）"
 
-            costmaps = []
-            node.create_subscription(OccupancyGrid, "/global_costmap/costmap",
-                                     costmaps.append, 10)
-            deadline = time.monotonic() + 60.0
-            while not costmaps and time.monotonic() < deadline:
-                rclpy.spin_once(node, timeout_sec=0.2)
-            assert costmaps, f"等不到 /global_costmap/costmap —— Nav2 还没激活（日志：{log.name}）"
+            # ⚠️ 判据必须问**生命周期**，不能只看代价地图有没有帧。
+            #    两个坑都踩过了：
+            #    ① VOLATILE 订 latch 话题 → 一帧都收不到 → 报"等不到 costmap"（假红）；
+            #    ② 改成 TRANSIENT_LOCAL → **立刻**拿到那帧 → 提前放行，而 bt_navigator
+            #       这时还在 activating → 探针的目标撞上未激活的动作服务端
+            #       （实测："Action server is inactive. Rejecting the goal."）
+            #       → 整栈 abort → 之后什么都失败。
+            #    只有"bt_navigator 到 active"才真的等于"能干活" —— costmap 的帧是 latch 的，
+            #    它早于全栈就绪就已经存在了，所以它天然不能当这个信号。
+            # 真正的判据：bt_navigator 生命周期到 active。
+            state_client = node.create_client(GetState, "/bt_navigator/get_state")
+            assert state_client.wait_for_service(timeout_sec=60.0), \
+                f"等不到 /bt_navigator/get_state（日志：{log.name}）"
+            deadline = time.monotonic() + 90.0
+            state = ""
+            while time.monotonic() < deadline:
+                future = state_client.call_async(GetState.Request())
+                rclpy.spin_until_future_complete(node, future, timeout_sec=5.0)
+                if future.done() and future.result() is not None:
+                    state = future.result().current_state.label
+                    if state == "active":
+                        break
+                time.sleep(0.2)
+            assert state == "active", \
+                f"bt_navigator 没到 active（当前 {state or '未知'}，日志：{log.name}）"
         finally:
             rclpy.shutdown()
 
