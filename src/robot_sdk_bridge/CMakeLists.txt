@@ -15,6 +15,10 @@ find_package(rclcpp REQUIRED)
 find_package(rclcpp_action REQUIRED)
 find_package(nav2_msgs REQUIRED)
 find_package(control_msgs REQUIRED)
+find_package(moveit_msgs REQUIRED)
+find_package(shape_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(tf2_ros REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(robot_sdk_interfaces REQUIRED)
 find_package(robot_sdk_core REQUIRED)
@@ -39,6 +43,19 @@ ament_target_dependencies(motion_adapter
     robot_sdk_core
 )
 install(TARGETS motion_adapter DESTINATION lib/${PROJECT_NAME})
+
+add_executable(moveit_adapter src/moveit_adapter.cpp)
+ament_target_dependencies(moveit_adapter
+    rclcpp
+    rclcpp_action
+    moveit_msgs
+    shape_msgs
+    geometry_msgs
+    tf2_ros
+    robot_sdk_interfaces
+    robot_sdk_core
+)
+install(TARGETS moveit_adapter DESTINATION lib/${PROJECT_NAME})
 
 install(DIRECTORY launch DESTINATION share/${PROJECT_NAME})
 

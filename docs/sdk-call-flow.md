@@ -771,9 +771,80 @@ const T& valueOr(const T& fallback) const;// 失败时给兜底值
     以后真要加容差是向后兼容的，不亏。
   - **"保持当前姿态"不需要新字段** —— 客户从 `TransformManager::lookupTransform()` 读现在的填进去即可。
 
-  **落地进度**：`MoveToPose.action` ✅ —— 剩下：`MotionConfig::pose_action_name` →
-  `MotionAPI::moveToPose()` → `moveit_adapter`（Pose → `moveit_msgs/Constraints`）→
-  假的 `move_group` 替身（先打通链路，和当初 `joint_trajectory_mock` 一样）→ `probe_pose`。
+  **落地进度**：`MoveToPose.action` ✅ → `MotionConfig::pose_action_name` / `pose_frame`（含 `fromNode`
+  的参数声明）✅ → `MotionAPI::moveToPose()`（`cancelAll` 两条都清 ✅）✅ → **`moveit_adapter` ✅**
+  （在 `robot_sdk_bridge`：Pose → `moveit_msgs::Constraints` → `MoveGroup`）。剩下：假的
+  `move_group` 替身（先打通链路，和当初 `joint_trajectory_mock` 一样）→ `probe_pose`。
+
+  **翻译时撞上的两处语义陷阱**（别再照搬）：
+
+  - **`max_velocity` 要映射到 `max_cartesian_speed`（m/s），不是 `max_velocity_scaling_factor`** ——
+    前者是**速度**，后者是**比例**（乘在 **robot model** 的上限上）。硬套会把 "0.5 m/s" 当成
+    "半速"：**数值碰巧一样、意思完全不同**。MoveIt 两种都有：**关节空间给比例、笛卡尔给 m/s**，
+    而 `max_cartesian_speed <= 0` 的语义正是"不修改轨迹" —— 和 SDK 的"0 = 不指定"**完全对齐**。
+    ⚠️ 它得配合 `default_planning_request_adapters/LimitMaxCartesianLinkSpeed` 才生效，
+    没配会被**静默忽略**（MoveIt 自己的注释里写明了）。
+    另记一笔：`scaling_factor` 的**默认是 1.0（满速）**，而且**设成 0.0 会被内部改成 1.0** ——
+    "设 0" 在那儿竟然等于满速。
+  - **`MoveGroup` 的反馈只有一个 `state` 字符串**（`PLANNING` / `MONITOR` / …），
+    **没有位姿、没有百分比** —— 所以末端位姿是适配器**自己查 TF** 得到的，完成度只能按阶段分档。
+    而且 **规划成功 ≠ 走得到**：`final_position_error` 必须**执行完从 TF 实测**，
+    拿"规划出来的终点"是**期望值**，不是实测值。
+
+  **已认知的口径缺口**（现在不加，但要记着）：
+
+  - **"相对快慢"这个能力没透出来** —— 客户能说"这段 0.5 m/s"（绝对量），**说不出
+    "整条先慢跑"**（相对）。这是**真取舍**，不是疏忽。
+  - **补救办法不是"透传 MoveIt 的 scaling"**，两条理由：
+    ① 那个字段的语义是"乘在 **MoveIt 的 robot model** 的上限上" —— 一透传，SDK 的契约就
+       继承了 MoveIt 的语义，**换后端即废**；而 `robot_sdk_interfaces` 存在的理由恰恰是
+       "**运动后端可以被替换而不破坏客户代码**"。
+    ② 透传并没多给客户能力，只是把**两种口径塞进同一个字段** —— 正是 MoveIt 自己踩的那个坑
+       （`scaling_factor` 设 `0.0` 被内部改成 `1.0` = 满速）。
+  - **真要做，就加独立字段，并把基准划给执行侧**：`accel_ratio`（0..1，语义 = "在**执行侧
+    自己**的上限上打几折"）。基准成了执行侧的**内部约定** ⇒ 契约仍不绑机器人。
+    **为什么相对量是刚需、不是退而求其次**：客户手里没有"末端最大加速度是多少"这个数
+    （机器人不是他造的），他要的是"**抖不抖**"这种感觉 —— 逼他填绝对值，他只能查手册加换算，
+    而换算完给出来的那个数**还是拍的**。**试错**才是他真正的操作方式（0.3 洒了 → 0.2 不洒）。
+    所以这件事要**分成两件**：
+    - **绝对量的安全上界** → 归**执行侧部署时的全局配置**（MoveIt 那边就是 Pilz 的
+      `cartesian_limits`：`max_trans_acc: 2.25`）。那是**集成商**的活，不是操作客户的活。
+    - **相对量的现场调节** → 归按目标的字段（就是这里说的 `accel_ratio`）。
+
+    约定沿用 `max_velocity` 那套：**`0 = 不指定`**。⚠️ **别抄 MoveIt** —— 在它那儿 `0.0`
+    属于"范围外"，会被内部改成 `1.0` = **满速**（因为 `0` 是个合法比例值，撞上了）。
+    范围：**只加 `accel_ratio` 一个** —— 速度那侧已经有绝对量字段（`max_velocity` →
+    `max_cartesian_speed`），缺的只有加速度这一格；且只加在 `MoveToPose`
+    （`MoveToJointPositions` 已经有 `max_acceleration`）。
+
+    **2026-09 决定：这一轮先不加**（还没有真实客户在要），后续迭代再考虑 ——
+    加它是**向后兼容**的，晚加不亏。
+
+  - **为什么先卡住的是"加速"而不是"速度"**：**在 `MotionPlanRequest`（请求）这一层**，
+    `max_cartesian_speed` 有绝对量对应（m/s），而笛卡尔加速度**只有比例形式**
+    （`max_acceleration_scaling_factor`）。
+    ⚠️ **但别把这话说过头**：笛卡尔加速度**是有绝对量形式的**（实测）—— 只是**不在请求里**，
+    而在**规划器的配置**里：Pilz 的 `cartesian_limits`
+    （`max_trans_acc: 2.25` m/s²、`max_trans_dec`、`max_rot_vel` 1.57 rad/s …）。
+    ⇒ 所以准确结论是：**绝对量只能在部署时全局设**（planner 配置），**按目标调只能给比例** ——
+    而那个比例的**基准正是那份全局绝对量**，两者是**同一套旋钮的两个层级**。
+    ⇒ `MoveToPose` 现在连 `max_acceleration` 都没有（`MoveToJointPositions` 有）。
+
+  **行业口径的实证**（2026-09 当场查的，别再凭印象）：
+
+  - **契约 / 参数 / 数据这一层是绝对量**：轨迹本身（`trajectory_msgs/JointTrajectoryPoint`
+    的 `velocities`）、机器人的上限（URDF `<limit velocity="2.0"/>`）、Nav2（`max_vel_x: 0.26`）。
+  - **比例属于另外两层**：**规划器内部**（MoveIt 的 scaling —— 基准就在它手边）、以及
+    **人调 / 覆写**（示教器旋钮那类，⚠️ **未验**，别当结论）。
+  - **一句话**：比例不是"另一种单位"，是"**加在绝对量上的一层临时覆写**" ——
+    所以它天然属于调试层，不属于目标层。
+  - **具体到"限加速度"，各处拿什么限**：`URDF <limit>` **根本不管加速度**（它只有
+    `lower` / `upper` / `effort` / `velocity`）；**轨迹本身带绝对量**
+    （`trajectory_msgs/JointTrajectoryPoint` 有 `accelerations` 数组）；**Nav2 用绝对量**
+    （`acc_lim_x: 2.5` / `acc_lim_theta: 3.2`）；`ros2_control` 的 `joint_limits` 也是
+    绝对量（`max_acceleration`；⚠️ 头文件这次没读到，**未验**）。
+    ⇒ **只有 MoveIt 的请求层用比例** —— 因为它就是那个"**手里有模型**"的层，说几成它自己
+    算得出来。别人没这个位置，所以只能要绝对量。
 
 | 2 | **MoveIt 适配器** | 有了笛卡尔目标之后，逆解与规划就是 MoveIt 的活。它**同样讲 `FollowJointTrajectory`**，所以客户代码不用动，照着 `motion_adapter` 再写一个即可 | §3.5 |
 

@@ -16,6 +16,12 @@
     <depend>rclcpp_action</depend>
     <depend>nav2_msgs</depend>
     <depend>control_msgs</depend>
+    <!-- moveit_adapter（SDK 笛卡尔目标 → MoveIt 的 MoveGroup）用到的。
+         客户代码不依赖它们 —— 这正是"适配层"存在的原因。 -->
+    <depend>moveit_msgs</depend>
+    <depend>shape_msgs</depend>
+    <depend>geometry_msgs</depend>
+    <depend>tf2_ros</depend>
     <depend>sensor_msgs</depend>
     <depend>robot_sdk_interfaces</depend>
     <!-- 为 robot_sdk/detail/action_slot.hpp（动作服务端的通用槽位） -->
