@@ -82,7 +82,7 @@ Summary: 69 tests, 0 errors, 0 failures, 0 skipped        # 65 个单元测试 +
 | 探针 | 验什么 |
 |---|---|
 | `probe_motion` | 忙时拒收 + 取消 |
-| `probe_wrap` | 连续关节走最短的一边 |
+| `probe_limits` | 超限的目标**当场被拒** |
 | `probe_avoid` | `avoid_obstacles` 的两种取值 |
 | `probe_accel` | `max_acceleration` 真的生效 |
 | `probe_navigate` | 到得了 + 真的走了 + 取消得掉 |
@@ -139,14 +139,16 @@ pytest src/robot_sdk_tests/test/test_navigation.py -s
 - 链路那条用 `os.killpg`（Popen 时 `start_new_session=True`）：`ros2 launch` 底下挂着
   假下游和适配器，只 kill 它自己会把孩子们变孤儿 —— 就是那个老病根。
 
-## `probe_wrap` 和「连续关节」
+## 限位归**执行侧**管
 
-它验的是"连续关节走最短的一边"，所以**目标那一侧得声明哪个关节是连续的**。
-fixture 起 mock 时已经带上了：
+`probe_limits` 验的是"**超限的目标该被当场拒**"。判这个的是**机器人自己**（mock ✅，
+真机上将来是控制器/驱动器 ✅）—— 它从自己的 URDF 里读限位，目标一到就判。
+
+**SDK 不查这个** ✅：它硬件无关，"这关节能转到哪"不是它该记的事 —— 两处各存一份规则
+迟早漂移。所以 fixture 起 mock 时要把描述喂给它：
 
 ```
---ros-args -p 'motion.continuous_joints:=[shoulder_pan_joint]'
+--ros-args -p robot_description_file:=<install/robot_description/share/.../mobile_manipulator.urdf>
 ```
 
-不声明的话它就老实走 6.7 rad（绕一整圈），`check()` 会**如实报失败** ——
-这不是探针的毛病，是那一侧少了个声明。（适配器那侧的参数叫 `continuous_joints`，没有 `motion.` 前缀。）
+不喂的话 mock 不认识限位（那正是它以前的行为：超限目标照发照转）。

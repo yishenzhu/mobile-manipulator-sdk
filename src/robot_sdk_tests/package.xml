@@ -28,6 +28,10 @@
   <test_depend>robot_sdk_bridge</test_depend>
   <!-- 被验的整栈：navigation.launch.py 来自它。 -->
   <test_depend>robot_sdk_nav2</test_depend>
+  <!-- mock 的关节限位来自这份 URDF（fixture 把路径喂给它）。
+       ⚠️ 必须**声明**依赖：colcon test 只把声明过的依赖放进测试环境，
+       少了这一条 conftest 一导入就 PackageNotFoundError（实测踩过）。 -->
+  <test_depend>robot_description</test_depend>
 
   <!-- 探针的本体是 check()（不符合预期就 assert），test/ 里把它们当 pytest 跑。
        起不来 = error，判据不对 = failure —— colcon test-result 里天生分开。 -->

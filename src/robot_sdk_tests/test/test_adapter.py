@@ -10,15 +10,10 @@
 
 from robot_sdk_tests.probe_accel import check as check_accel
 from robot_sdk_tests.probe_motion import check as check_motion
-from robot_sdk_tests.probe_wrap import check as check_wrap
 
 
 def test_motion_via_adapter(motion_chain):
     check_motion(motion_chain)
-
-
-def test_wrap_via_adapter(motion_chain):
-    check_wrap(motion_chain)
 
 
 def test_accel_via_adapter(motion_chain):

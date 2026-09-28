@@ -77,4 +77,17 @@ ament_export_include_directories(include)
 ament_export_dependencies(
     rclcpp geometry_msgs sensor_msgs tf2_ros robot_sdk_interfaces robot_sdk_core)
 
+if(BUILD_TESTING)
+    find_package(ament_cmake_gtest REQUIRED)
+    # joint_spec.cpp 是**编进可执行文件**的（不是库），所以测试把它再编一遍。
+    ament_add_gtest(test_joint_spec
+        test/test_joint_spec.cpp
+        src/joint_spec.cpp
+    )
+    target_include_directories(test_joint_spec PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+    ament_target_dependencies(test_joint_spec robot_sdk_core urdf)
+endif()
+
 ament_package()

@@ -28,9 +28,6 @@ def generate_launch_description():
                 executable="motion_adapter",
                 name="motion_adapter",
                 output="screen",
-                # 声明成连续关节，`probe_wrap` 才有"最短的一边"可走。写在启动文件里，
-                # 起完就能用 —— 不然每个用的人还得记得自己传一遍。
-                parameters=[{"continuous_joints": ["shoulder_pan_joint"]}],
             ),
         ]
     )

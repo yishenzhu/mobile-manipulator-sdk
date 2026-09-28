@@ -18,7 +18,7 @@ import time
 
 import pytest
 import rclpy
-from ament_index_python.packages import get_package_prefix
+from ament_index_python.packages import get_package_prefix, get_package_share_directory
 from nav_msgs.msg import OccupancyGrid
 from rclpy.action import ActionClient
 from sensor_msgs.msg import JointState
@@ -27,6 +27,10 @@ from robot_sdk_interfaces.action import MoveToJointPositions, NavigateToPose
 
 MOCK_EXE = os.path.join(get_package_prefix("robot_sdk_sim"), "lib", "robot_sdk_sim",
                         "mock_robot_node")
+# mock 的关节限位来自这份 URDF —— 它就是"机器人自述"，所以 fixture 得喂给它。
+# 不喂的话 mock 不认识限位（那正是以前的行为：超限目标照发照转）。
+ROBOT_URDF = os.path.join(get_package_share_directory("robot_description"),
+                          "urdf", "mobile_manipulator.urdf")
 ADAPTER_MOTION = "/sdk/move_to_joint_positions"
 ADAPTER_NAVIGATION = "/sdk/navigate_to_pose"
 
@@ -39,7 +43,7 @@ def mock_robot():
     杀壳杀不掉里面的进程（前几轮"清理干净"全是自欺）。
     """
     proc = subprocess.Popen(
-        [MOCK_EXE, "--ros-args", "-p", "motion.continuous_joints:=[shoulder_pan_joint]"],
+        [MOCK_EXE, "--ros-args", "-p", f"robot_description_file:={ROBOT_URDF}"],
     )
     try:
         yield

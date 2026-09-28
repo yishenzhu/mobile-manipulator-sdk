@@ -758,11 +758,16 @@ const T& valueOr(const T& fallback) const;// 失败时给兜底值
 
 | # | 事项 | 为什么 / 怎么做 | 相关 |
 |---|---|---|---|
-| 1 | **URDF** | 现在关节就是"一串名字 + 一串弧度"，**没有类型、没有单位、没有限位**。URDF 能把这些说清楚（连续关节 / 有限位的关节 / 速度加速度上限），适配器里那些硬编码也就有了出处 | §3.5 §7.2.1 |
-| 2 | **SDK 加笛卡尔目标支持** | 现在只有 `MoveToJointPositions`（点名关节角）。要"把夹爪移到 (x, y, z)"，得先有这个目标类型 —— 顺带也需要 TF 反馈 | §3.5 |
-| 3 | **MoveIt 适配器** | 有了笛卡尔目标之后，逆解与规划就是 MoveIt 的活。它**同样讲 `FollowJointTrajectory`**，所以客户代码不用动，照着 `motion_adapter` 再写一个即可 | §3.5 |
+| 1 | **SDK 加笛卡尔目标支持** | 现在只有 `MoveToJointPositions`（点名关节角）。要"把夹爪移到 (x, y, z)"，得先有这个目标类型 —— 顺带也需要 TF 反馈 | §3.5 |
+| 2 | **MoveIt 适配器** | 有了笛卡尔目标之后，逆解与规划就是 MoveIt 的活。它**同样讲 `FollowJointTrajectory`**，所以客户代码不用动，照着 `motion_adapter` 再写一个即可 | §3.5 |
 
 **已办**：
+
+- ✅ **URDF** —— 新增 `robot_description` 包（xacro 源 ✅ + 构建期展开成纯 URDF ✅）。
+  **谁读它**：**执行侧**（`mock_robot_node` ✅，将来是控制器/驱动器）—— 关节的**类型 / 限位 /
+  速度上限**是机器人的属性，SDK 只发意图，不替它记一份（两处各存一份规则迟早漂移）。
+  于是 `MotionConfig` 里那两个**临时字段**（`continuous_joints` / `default_max_velocity`）删掉了。
+  验收：`probe_limits`（超限该当场被拒 ✅）+ `mock_robot_node` 实测 ✅。
 
 - ✅ **依赖分档** —— `robot_sdk_tests` **整包只有测试**（模块是探针、fixture 负责把被验的东西
   起起来），所以依赖全挪成了 `test_depend`。**两个例外**：`launch` / `launch_ros` 留在

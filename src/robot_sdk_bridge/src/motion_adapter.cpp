@@ -19,7 +19,6 @@
 #include <robot_sdk_interfaces/action/move_to_joint_positions.hpp>
 
 #include "robot_sdk/detail/action_slot.hpp"
-#include "robot_sdk/detail/joint_wrap.hpp"
 
 namespace robot_sdk::bridge {
 
@@ -41,8 +40,6 @@ class MotionAdapter : public rclcpp::Node {
         "jtc_action_name", "/joint_trajectory_controller/follow_joint_trajectory");
     joint_states_topic_ = declare_parameter<std::string>("joint_states_topic", "/joint_states");
     default_max_velocity_ = declare_parameter<double>("default_max_velocity", 1.0);
-    // 连续关节（能无限往一个方向转的那种）—— 对它们，"目标 − 当前"走最短的一边。
-    declare_parameter<std::vector<std::string>>("continuous_joints", std::vector<std::string>{});
 
     server_group_ = create_callback_group(rclcpp::CallbackGroupType::Reentrant);
     client_group_ = create_callback_group(rclcpp::CallbackGroupType::Reentrant);
@@ -122,15 +119,9 @@ class MotionAdapter : public rclcpp::Node {
         // 补成**整条**关节列表：`FollowJointTrajectory` 默认不收部分关节的目标，
         // 而 SDK 的语义是"目标没点名的关节保持原位" —— 那些关节的目标就是当前值。
         target_positions_ = joint_positions_;
-        const auto continuous = get_parameter("continuous_joints").as_string_array();
         for (std::size_t i = 0; i < indices.size(); ++i) {
           const auto index = static_cast<std::size_t>(indices[i]);
-          double wanted = target.position[i];
-          // 连续关节：走最短的一边，否则 0.3 → 7.0 会老实转 6.7 rad（≈384°）。
-          if (std::find(continuous.begin(), continuous.end(), target.name[i]) != continuous.end()) {
-            wanted = joint_positions_[index] + shortestAngleDelta(joint_positions_[index], wanted);
-          }
-          target_positions_[index] = wanted;
+          target_positions_[index] = target.position[i];
         }
         initial_error_ = maxError(joint_positions_, target_positions_);
       }

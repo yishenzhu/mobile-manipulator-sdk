@@ -25,6 +25,8 @@
         这些判断归它 —— SDK 只管发意图，不替机器人记一份。 -->
     <depend>urdf</depend>
 
+    <test_depend>ament_cmake_gtest</test_depend>
+
     <export>
         <build_type>ament_cmake</build_type>
     </export>

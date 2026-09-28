@@ -9,8 +9,8 @@
 
 from robot_sdk_tests.probe_accel import check as check_accel
 from robot_sdk_tests.probe_avoid import check as check_avoid
+from robot_sdk_tests.probe_limits import check as check_limits
 from robot_sdk_tests.probe_motion import check as check_motion
-from robot_sdk_tests.probe_wrap import check as check_wrap
 
 
 def test_motion_busy_and_cancel(mock_robot):
@@ -21,8 +21,8 @@ def test_avoid_obstacles(mock_robot):
     check_avoid("/navigate_to_pose")
 
 
-def test_wrap_continuous_joint(mock_robot):
-    check_wrap("/move_to_joint_positions")
+def test_rejects_out_of_range(mock_robot):
+    check_limits("/move_to_joint_positions")
 
 
 def test_accel_is_honored(mock_robot):
