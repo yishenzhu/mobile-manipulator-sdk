@@ -17,7 +17,12 @@
        装出去的是展开后的产物，所以运行期不需要它 —— 但构建时得在 PATH 上。 -->
   <build_depend>xacro</build_depend>
 
-  <export>
+    <!-- MoveIt 那侧：launch 用 MoveItConfigsBuilder 组装，跑的是 move_group。
+         ⚠️ 必须声明 —— `colcon test` 只把声明过的依赖放进环境（实测踩过）。 -->
+    <exec_depend>moveit_configs_utils</exec_depend>
+    <exec_depend>moveit_ros_move_group</exec_depend>
+
+    <export>
     <build_type>ament_cmake</build_type>
   </export>
 </package>

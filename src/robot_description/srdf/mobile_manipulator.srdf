@@ -1,0 +1,44 @@
+<?xml version="1.0"?>
+<!-- 语义描述。URDF 只说「有哪些关节」，SRDF 说「哪些关节算一组、谁是末端」。
+
+     下面这份是照着 build/robot_description/mobile_manipulator.urdf 的**真实结构**写的
+     （关节名/父子关系都是从那份 URDF 里读出来的，不是照抄别人家的模板）：
+
+       base_footprint → base_link → arm_base_link
+         → shoulder_pan_joint(rev) → shoulder_lift_joint(rev)
+         → elbow_joint(rev)        → wrist_joint(rev) → wrist_link
+             → gripper_base_link → gripper_joint(prismatic) → left_finger_link
+             └ gripper_right_joint(fixed) → right_finger_link
+-->
+<robot name="mobile_manipulator">
+
+  <!-- 机械臂：四个 revolute 关节连成一条链。
+       ⚠️ chain 必须**连续**：从 arm_base_link 一路到 wrist_link，中间不能有分叉。
+         底盘那几个关节（车轮/caster）不属于它。 -->
+  <group name="arm">
+    <chain base_link="arm_base_link" tip_link="wrist_link"/>
+  </group>
+
+  <!-- 夹爪：只有一个可动关节（prismatic）。
+       ⚠️ 右指在 URDF 里是 **fixed** 关节 ⇒ 它不会跟着左指动。
+          这是 URDF 本身的样子，SRDF 管不了 —— 要让两指联动得改 URDF。 -->
+  <group name="gripper">
+    <joint name="gripper_joint"/>
+  </group>
+
+  <!-- 末端执行器：告诉 MoveIt「夹爪挂在手臂末端」。
+       parent_group=arm ⇒ 规划手臂时会把它一起带上。 -->
+  <end_effector name="gripper_ee" parent_link="wrist_link" group="gripper"
+                parent_group="arm"/>
+
+  <!-- ⚠️ 允许碰撞矩阵（disable_collisions）**先留空** —— 那是不做自碰撞检查。
+       它是白名单（"这些连杆本来就会互相碰"），不填只会更保守（慢一点、可能报
+       假碰撞），不会算错。等真跑起来按它实际报的碰撞往里加。 -->
+
+  <!-- 移动底盘的"世界锚点"。固定式机械臂通常把 base 焊在台上；
+       我们是移动机器人 ⇒ 先用 fixed 把 world 接到 base_footprint，
+       底盘怎么动由 Nav2/odom 那边管，不归 MoveIt 规划。 -->
+  <virtual_joint name="world_joint" type="fixed" parent_frame="world"
+                 child_link="base_footprint"/>
+
+</robot>

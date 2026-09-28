@@ -1,0 +1,16 @@
+# Pilz 规划器的**笛卡尔限值** —— 就是"末端能有多猛"那一层。
+#
+# ⚠️ 它和 max_cartesian_speed（每个目标可调、单位 m/s）是**同一套旋钮的两个层级**：
+#    这里是**部署时全局设**的绝对量，那里是**按目标调**的比例（max_*_scaling_factor）。
+#    所以 §11 那条"绝对量只能在部署时全局设"说的就是这份文件。
+#
+# ⚠️ 它只在用 **Pilz** 规划器（`pipeline_id: pilz_industrial_motion_planner`）时才生效。
+#    默认的 OMPL 用不用它 —— **没验过**（替身也验不了），别当结论。
+#
+# 数值参照 MoveIt 官方 Panda 那份示例（同一量级），不是照抄结论 ——
+# 真要上这台机器人得按载重/工艺重新定。
+cartesian_limits:
+  max_trans_vel: 1.0      # m/s
+  max_trans_acc: 2.25     # m/s²   ← 笛卡尔加速度待的地方
+  max_trans_dec: -5.0     # m/s²   减速度单独限（刹车一般比加速狠）
+  max_rot_vel: 1.57       # rad/s

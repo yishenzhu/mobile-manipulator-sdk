@@ -1,0 +1,14 @@
+# MoveIt 的关节限值**覆盖**。
+#
+# ⚠️ 故意留空：不覆盖任何东西 ⇒ 一切按 URDF 里的 <limit> 走（我们的 URDF 有
+#    velocity，实测模拟器读的就是它）。要覆盖某个关节的限速/限位，在这里写：
+#
+#     joint_limits:
+#       shoulder_lift_joint:
+#         has_velocity_limits: true
+#         max_velocity: 1.0
+#
+# ⚠️ 但**文件本身必须存在** —— `MoveItConfigsBuilder` 会去找 config/joint_limits.yaml，
+#    找不到直接让 launch 失败（实测：`ParameterBuilderFileNotFoundError`）。
+#    也就是说"不给就用 URDF 的"这种想法是错的：**得给一个空的**。
+joint_limits: {}

@@ -17,6 +17,10 @@ add_custom_target(generate_urdf ALL DEPENDS ${URDF_FILE})
 
 # xacro 源也装出去 —— 想改机器人形状的人应该改它，而不是改展开后的产物。
 install(DIRECTORY urdf DESTINATION share/${PROJECT_NAME})
+# SRDF 也装出去 —— 它是"语义描述"（哪些关节算一组、谁是末端），MoveIt 那侧要读它。
+install(DIRECTORY srdf DESTINATION share/${PROJECT_NAME})
+# MoveIt 那侧的配置（kinematics.yaml）和它的 launch，一起装。
+install(DIRECTORY config launch DESTINATION share/${PROJECT_NAME})
 install(FILES ${URDF_FILE} DESTINATION share/${PROJECT_NAME}/urdf)
 
 ament_package()
