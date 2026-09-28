@@ -20,11 +20,13 @@ find_package(control_msgs REQUIRED)
 find_package(trajectory_msgs REQUIRED)
 find_package(robot_sdk_interfaces REQUIRED)
 find_package(robot_sdk_core REQUIRED)
+find_package(urdf REQUIRED)
 
 # 这是个可执行文件（不是库）：模拟机器人是个"程序"。
 add_executable(mock_robot_node
     src/mock_robot_node.cpp
     src/mock_robot_main.cpp
+    src/joint_spec.cpp
 )
 # 注意这里**不用** $<BUILD_INTERFACE:...>：这个路径是 PRIVATE 的
 # （不往外传播），而且这个可执行文件不导出 —— 所以"构建树 vs 安装树"的分歧
@@ -40,10 +42,14 @@ ament_target_dependencies(mock_robot_node
     tf2_ros
     robot_sdk_interfaces
     robot_sdk_core
+    urdf
 )
 
 # 假的下游：说 FollowJointTrajectory 的关节轨迹控制器替身，用来验运动链路。
-add_executable(joint_trajectory_mock src/joint_trajectory_mock.cpp)
+add_executable(joint_trajectory_mock
+    src/joint_trajectory_mock.cpp
+    src/joint_spec.cpp
+)
 target_include_directories(joint_trajectory_mock PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
@@ -54,6 +60,7 @@ ament_target_dependencies(joint_trajectory_mock
     control_msgs
     trajectory_msgs
     robot_sdk_core
+    urdf
 )
 
 # 可执行文件装到 lib/<包名>/ 下（ROS 2 的约定，ros2 run 就是从这里找）。

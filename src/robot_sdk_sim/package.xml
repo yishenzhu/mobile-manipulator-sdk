@@ -21,6 +21,9 @@
     <depend>trajectory_msgs</depend>
     <depend>robot_sdk_interfaces</depend>
     <depend>robot_sdk_core</depend>
+    <!-- 读机器人的 URDF：关节的类型 / 限位 / 速度上限来自它。模拟器是"执行侧"，
+        这些判断归它 —— SDK 只管发意图，不替机器人记一份。 -->
+    <depend>urdf</depend>
 
     <export>
         <build_type>ament_cmake</build_type>

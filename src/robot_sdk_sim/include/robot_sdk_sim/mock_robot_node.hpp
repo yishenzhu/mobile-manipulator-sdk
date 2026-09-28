@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -20,6 +21,8 @@
 
 #include <robot_sdk_interfaces/action/move_to_joint_positions.hpp>
 #include <robot_sdk_interfaces/action/navigate_to_pose.hpp>
+
+#include "robot_sdk_sim/joint_spec.hpp"
 #include <robot_sdk_interfaces/msg/robot_status.hpp>
 #include <robot_sdk_interfaces/srv/get_robot_status.hpp>
 
@@ -192,6 +195,9 @@ class MockRobotNode : public rclcpp::Node {
   MotionJob motion_;
   std::vector<std::string> joint_names_;
   std::vector<double> joint_positions_;
+  /// 从 URDF 读来的关节属性（连续不连续 / 限位 / 速度上限），**按名字索引**。
+  /// 空 = 没给描述 —— 那就退回"不查限位、不折角"，也就是这台模拟器以前的行为。
+  std::map<std::string, JointSpec> joint_specs_;
   double battery_{100.0};
   bool charging_{false};
   double uptime_s_{0.0};

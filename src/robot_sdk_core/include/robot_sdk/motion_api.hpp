@@ -22,7 +22,8 @@ struct MotionGoal {
   std::vector<std::string> joint_names{};
   std::vector<double> positions{};
 
-  /// 速度上限。**<= 0 = 用 `MotionConfig::default_max_velocity`。**
+  /// 速度上限。**<= 0 = 不指定** —— 由机器人按自己的上限决定（那是它的属性，
+  /// 写在它的 URDF 里；SDK 不该替它记一份）。
   double max_velocity{0.0};
 
   /// 加速度上限。**<= 0 = 由后端决定。**

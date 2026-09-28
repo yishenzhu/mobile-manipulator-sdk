@@ -182,6 +182,18 @@ MockRobotNode::MockRobotNode(const rclcpp::NodeOptions &options)
     ensureJoint(config_.motion.gripper_joint);
   }
 
+  // 关节的属性（连续不连续 / 限位 / 速度上限）来自**机器人自己的 URDF**。
+  // 这里不查、也不存在配置里 —— 那是"执行侧"才知道的事，SDK 只发意图。
+  // 没给描述就退回老行为：不折角、不查限位（也就是少了这两项判断）。
+  const std::string urdf = declare_parameter<std::string>("robot_description_file", "");
+  if (!urdf.empty()) {
+    joint_specs_ = jointSpecsFromFile(urdf, joint_names_);
+    if (joint_specs_.empty()) {
+      RCLCPP_WARN(get_logger(), "读不到关节描述 %s —— 限位不查、也不折角",
+                  urdf.c_str());
+    }
+  }
+
   // 话题名一律用**相对名**，由 rcl 按节点命名空间展开。
   status_pub_ = create_publisher<RobotStatus>(config_.status.status_topic, 10);
   joint_pub_ = create_publisher<sensor_msgs::msg::JointState>(
@@ -570,6 +582,7 @@ rclcpp_action::GoalResponse MockRobotNode::handleMotionGoal(
 
   bool busy = false;
   bool unknown = false;
+  std::string out_of_range{}; // 非空 = 有关节超限，内容是那句人话
   {
     // 锁内只碰数据：先在**局部**把目标拼好，全部合法才提交（不留半成品状态）。
     std::lock_guard<std::mutex> lock(mutex_);
@@ -585,15 +598,27 @@ rclcpp_action::GoalResponse MockRobotNode::handleMotionGoal(
         }
         const std::size_t index = static_cast<std::size_t>(it - joint_names_.begin());
         double wanted = goal->target.position[k];
-        // 连续关节：走最短的一边，否则 0.3 → 7.0 会老实转 6.7 rad（≈384°）。
-        if (std::find(config_.motion.continuous_joints.begin(),
-                      config_.motion.continuous_joints.end(),
-                      goal->target.name[k]) != config_.motion.continuous_joints.end()) {
-          wanted = joint_positions_[index] + shortestAngleDelta(joint_positions_[index], wanted);
+        // 关节描述是可选的：没有它（或它里面没这个关节）就不判限位、不折角。
+        // 找到之后才取引用 —— 迭代器等于 end() 时解引用是 UB，不能无条件取。
+        if (const auto spec_it = joint_specs_.find(goal->target.name[k]);
+            spec_it != joint_specs_.end()) {
+          const JointSpec &spec = spec_it->second;
+          // 限位：**执行侧**才判"能不能到"。超限的目标当场拒，不转过去 ——
+          // 真机上那就是撞机械限位。
+          if (spec.limited() && (wanted < spec.lower || wanted > spec.upper)) {
+            out_of_range = goal->target.name[k] + " 的目标 " + std::to_string(wanted) +
+                           " 超出限位 [" + std::to_string(spec.lower) + ", " +
+                           std::to_string(spec.upper) + "]";
+            break;
+          }
+          // 连续关节：走最短的一边，否则 0.3 → 7.0 会老实转 6.7 rad（≈384°）。
+          if (spec.continuous) {
+            wanted = joint_positions_[index] + shortestAngleDelta(joint_positions_[index], wanted);
+          }
         }
         target[index] = wanted;
       }
-      if (!unknown) {
+      if (!unknown && out_of_range.empty()) {
         motion_.target = std::move(target);
         motion_.max_velocity =
             goal->max_velocity > 0.0f ? goal->max_velocity : kDefaultJointVelocity;
@@ -619,6 +644,10 @@ rclcpp_action::GoalResponse MockRobotNode::handleMotionGoal(
   }
   if (unknown) {
     RCLCPP_WARN(get_logger(), "拒绝运动目标：包含本机没有的关节");
+    return rclcpp_action::GoalResponse::REJECT;
+  }
+  if (!out_of_range.empty()) {
+    RCLCPP_WARN(get_logger(), "拒绝运动目标：%s", out_of_range.c_str());
     return rclcpp_action::GoalResponse::REJECT;
   }
   return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;

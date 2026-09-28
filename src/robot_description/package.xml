@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>robot_description</name>
+  <version>0.1.0</version>
+  <description>
+    机器人的 URDF（xacro 源）：关节的**类型、限位、速度上限**都在这里。
+    这套代码里"这台机器人长什么样"只有这一个出处 —— mock 和 SDK 都从它读，
+    而不是各自硬编码一份（原来 mock 里是一串写死的关节名 + 一个数管所有关节的速度）。
+  </description>
+  <maintainer email="3464428214@qq.com">Robot SDK</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <!-- 只在**构建期**用：把 xacro 展开成纯 URDF（见 CMakeLists.txt）。
+       装出去的是展开后的产物，所以运行期不需要它 —— 但构建时得在 PATH 上。 -->
+  <build_depend>xacro</build_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

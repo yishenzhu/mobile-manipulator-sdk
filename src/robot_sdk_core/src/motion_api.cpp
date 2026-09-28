@@ -23,7 +23,9 @@ bool MotionAPI::serverAvailable(std::chrono::duration<double> timeout) {
 }
 
 Error MotionAPI::validate(const MotionGoal& goal) const {
-  // 关节名和位置必须一一对应 —— 否则后端根本不知道该动哪个关节。
+  // 只查**与具体机器人无关**的那部分：名字和位置必须一一对应。
+  // 再做一份"这关节能转到哪"是**不收敛**的 —— 那是机器人的属性，
+  // 由它自己在收到目标时判（见 config.hpp 里 MotionConfig 的说明）。
   if (goal.joint_names.empty()) {
     return Error::InvalidArgument("motion goal has no joint names");
   }
@@ -52,9 +54,8 @@ std::shared_ptr<ActionHandle<MotionAPI::Action>> MotionAPI::moveToJointPositions
   Action::Goal message;
   message.target.name = goal.joint_names;
   message.target.position = goal.positions;
-  // max_velocity 有哨兵语义：<= 0 时落到配置默认值。
-  message.max_velocity = static_cast<float>(
-      goal.max_velocity > 0.0 ? goal.max_velocity : config_.default_max_velocity);
+  // max_velocity 照原样透传：<= 0 表示"不指定"，由机器人按自己的上限决定。
+  message.max_velocity = static_cast<float>(goal.max_velocity);
   message.max_acceleration = static_cast<float>(goal.max_acceleration);
 
   rclcpp_action::Client<Action>::SendGoalOptions options;

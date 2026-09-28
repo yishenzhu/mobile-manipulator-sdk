@@ -42,11 +42,7 @@ struct MotionConfig {
   /// 后端 action 名。⚠️ 必须与 `NavigationConfig::action_name` **不同**（同上）。
   std::string action_name{"move_to_joint_positions"};
   std::vector<std::string> joint_names{};
-  /// **连续关节**（能无限往一个方向转的那种）。对它们，"目标 − 当前"走最短的一边，
-  /// 不绕远路。默认空 = 不折角 —— 全是旋转关节的机器人，行为与以前一模一样。
-  std::vector<std::string> continuous_joints{};
   double default_timeout_s{30.0};
-  double default_max_velocity{0.5};
   std::map<std::string, std::vector<double>> named_targets{};
   std::string gripper_joint{"gripper_joint"};
   double gripper_open_position{0.04};
@@ -54,6 +50,10 @@ struct MotionConfig {
   /// 夹爪动作的超时。夹爪行程短、动作快，所以**独立于 default_timeout_s** ——
   /// 用通用的 30 秒去等一个夹爪动作，卡住时要干等半分钟。
   double gripper_timeout_s{5.0};
+  // ⚠️ 这里**没有**"连续关节 / 速度上限 / 关节限位" —— 它们不是配置，是**机器人的属性**：
+  //    能转到哪、转多快、能不能一直转，都写在它的 URDF 里，由**执行侧**（机器人自己）
+  //    读出来并用上。SDK 只发意图（去哪、多快），不替机器人判断"能不能"。
+  //    所以也别在这里加回来 —— 两处各存一份迟早会漂移。
 };
 
 struct PerceptionConfig {
