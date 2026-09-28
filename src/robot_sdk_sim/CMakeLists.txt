@@ -21,6 +21,7 @@ find_package(trajectory_msgs REQUIRED)
 find_package(robot_sdk_interfaces REQUIRED)
 find_package(robot_sdk_core REQUIRED)
 find_package(urdf REQUIRED)
+find_package(moveit_msgs REQUIRED)
 
 # 这是个可执行文件（不是库）：模拟机器人是个"程序"。
 add_executable(mock_robot_node
@@ -76,6 +77,15 @@ install(DIRECTORY launch DESTINATION share/${PROJECT_NAME})
 ament_export_include_directories(include)
 ament_export_dependencies(
     rclcpp geometry_msgs sensor_msgs tf2_ros robot_sdk_interfaces robot_sdk_core)
+
+# 假 move_group：只为把 moveit_adapter 的翻译摊开来看，不做任何规划。
+add_executable(move_group_mock src/move_group_mock.cpp)
+ament_target_dependencies(move_group_mock
+    rclcpp
+    rclcpp_action
+    moveit_msgs
+)
+install(TARGETS move_group_mock DESTINATION lib/${PROJECT_NAME})
 
 if(BUILD_TESTING)
     find_package(ament_cmake_gtest REQUIRED)

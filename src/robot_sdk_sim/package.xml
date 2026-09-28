@@ -24,6 +24,9 @@
     <!-- 读机器人的 URDF：关节的类型 / 限位 / 速度上限来自它。模拟器是"执行侧"，
         这些判断归它 —— SDK 只管发意图，不替机器人记一份。 -->
     <depend>urdf</depend>
+    <!-- 假 move_group（move_group_mock）用的：替 moveit_adapter 的第一次检验当上游。
+         它只收发 MoveGroup 的消息，不做规划。 -->
+    <depend>moveit_msgs</depend>
 
     <test_depend>ament_cmake_gtest</test_depend>
 
