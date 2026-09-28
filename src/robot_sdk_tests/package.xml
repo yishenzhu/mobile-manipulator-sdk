@@ -15,6 +15,8 @@
 
   <exec_depend>rclpy</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
   <exec_depend>robot_sdk_interfaces</exec_depend>
   <!-- 探针的对面是"机器人"，所以要能把它起起来。注意它们**不走 SDK** ——
        用的是裸 action 接口（robot_sdk_interfaces），这样看机器人侧的行为更直接；
@@ -28,6 +30,8 @@
        起不来 = error，判据不对 = failure —— colcon test-result 里天生分开。 -->
   <test_depend>python3-pytest</test_depend>
   <test_depend>ament_index_python</test_depend>
+  <!-- 被验的整栈：navigation.launch.py 来自它。 -->
+  <test_depend>robot_sdk_nav2</test_depend>
 
   <export>
     <build_type>ament_python</build_type>

@@ -754,7 +754,18 @@ const T& valueOr(const T& fallback) const;// 失败时给兜底值
 
 ## 11. 后续（TODO）
 
+**这份是唯一的那份路线图**，按这个顺序做（2026-09 定的）：
+
 | # | 事项 | 为什么 / 怎么做 | 相关 |
 |---|---|---|---|
-| 1 | **MoveIt 适配器** | SDK 一旦有**笛卡尔目标**（"把夹爪移到 (x, y, z)"）或需要**绕障**，就必须有人做逆解与规划 —— 那是 MoveIt 的活。它**同样讲 `FollowJointTrajectory`**，所以客户代码不用动，加一个适配器即可 | §3.5 |
+| 1 | **依赖分档** | `robot_sdk_tests` 里 `robot_sdk_sim` / `robot_sdk_bridge` 写成了 `exec_depend`，其实**只有测试用**（是 fixture 把它们起起来的）—— 应该是 `test_depend` | `package.xml` |
+| 2 | **URDF** | 现在关节就是"一串名字 + 一串弧度"，**没有类型、没有单位、没有限位**。URDF 能把这些说清楚（连续关节 / 有限位的关节 / 速度加速度上限），适配器里那些硬编码也就有了出处 | §3.5 §7.2.1 |
+| 3 | **SDK 加笛卡尔目标支持** | 现在只有 `MoveToJointPositions`（点名关节角）。要"把夹爪移到 (x, y, z)"，得先有这个目标类型 —— 顺带也需要 TF 反馈 | §3.5 |
+| 4 | **MoveIt 适配器** | 有了笛卡尔目标之后，逆解与规划就是 MoveIt 的活。它**同样讲 `FollowJointTrajectory`**，所以客户代码不用动，照着 `motion_adapter` 再写一个即可 | §3.5 |
+
+**不在上面这条线上的**：pybind11 绑定（`robot_sdk_py`）、Gazebo。
+
+> **怎么验**：`colcon test` 一条命令跑完 —— 65 条 C++ 单元测试（函数级，在 `robot_sdk_core/test`）
+> 加 8 条验收探针（行为级，在 `robot_sdk_tests`：4 条打 mock、3 条打适配器、1 条打 Nav2 整栈）。
+> 探针怎么用、踩过哪些坑，见 `src/robot_sdk_tests/README.md`。
 

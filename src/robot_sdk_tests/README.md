@@ -77,6 +77,7 @@ Summary: 69 tests, 0 errors, 0 failures, 0 skipped        # 65 个单元测试 +
 |---|---|---|
 | `test/test_probes.py` | mock 机器人 | 4 |
 | `test/test_adapter.py` | 假下游 + 适配器 | 3 |
+| `test/test_navigation.py` | Nav2 整栈 | 1 |
 
 | 探针 | 验什么 |
 |---|---|
@@ -84,6 +85,7 @@ Summary: 69 tests, 0 errors, 0 failures, 0 skipped        # 65 个单元测试 +
 | `probe_wrap` | 连续关节走最短的一边 |
 | `probe_avoid` | `avoid_obstacles` 的两种取值 |
 | `probe_accel` | `max_acceleration` 真的生效 |
+| `probe_navigate` | 到得了 + 真的走了 + 取消得掉 |
 
 ## 适配器那条路
 
@@ -97,12 +99,35 @@ pytest src/robot_sdk_tests/test/test_adapter.py -s
 
 `probe_avoid` 不在这组 —— 适配器只管关节运动，导航链路不在 `motion_chain` 里。
 
-### 两条路**互斥**（靠 scope 保证）
+## 导航那条路（Nav2 整栈）
 
-两个 fixture 都是 **`module` 级** —— 每个文件各起一份，**拆干净了才走下一个文件**，
-所以 mock 和适配器在时间上不重叠。
+`test_navigation.py` 打的是 `ros2 launch robot_sdk_nav2 navigation.launch.py` 起来的
+**整栈**：mock 机器人 + `nav2_adapter` + Nav2（planner / controller / behavior /
+bt_navigator + map_server）。也就是说这一条同时压到：适配器的翻译、Nav2 的规划与追踪、
+map_server、生命周期管理 —— 全仓最复杂的一条链路。
 
-**别改成 `session` 级**：那样两个会同时活到会话末尾，而**同名 action 服务端不止一个**
+```bash
+pytest src/robot_sdk_tests/test/test_navigation.py -s
+```
+
+它验四件事：**到得了**（`success`）、**误差在容差内**（≤ `xy_goal_tolerance` 0.15）、
+**真的走了**（从 TF 上读 `map→base_footprint`，走了 1 m 以上才算）、**取消得掉**。
+
+两处讲究：
+
+- **先回原点**：不然"走了多远"取决于上一摊把机器人留在哪（`probe_accel` 栽过一次）；
+- **就绪条件不是"服务端在"**：Nav2 的动作服务端在节点构造时就 advertise 了，那**不代表**
+  生命周期激活完成 —— 要等**代价地图**发出来（planner/controller 激活之后才会发）。
+
+整栈有十来个节点，日志能把 pytest 的输出淹掉，所以 fixture 把它**写进临时文件**，
+真出事时 assert 的消息里带着那个路径。
+
+### 几条路**互斥**（靠 scope 保证）
+
+三个 fixture 都是 **`module` 级** —— 每个文件各起一份，**拆干净了才走下一个文件**，
+所以它们在时间上不重叠。
+
+**别改成 `session` 级**：那样几个会同时活到会话末尾，而**同名 action 服务端不止一个**
 时回应会串、future 可能**永远不完成**（见开头那节）—— 症状是"探针挂住，对面却好好的"。
 
 > 这条以前是靠 `conftest.py` 里一个 `ACTIVE_ROUTE` 标志去拦的。后来发现它只挡得住
