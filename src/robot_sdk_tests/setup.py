@@ -1,3 +1,4 @@
+import glob
 import os
 
 from setuptools import setup
@@ -16,7 +17,10 @@ setup(
         ("share/" + package_name, ["package.xml"]),
         (
             os.path.join("share", package_name, "launch"),
-            ["launch/motion_chain.launch.py"],
+            # ⚠️ 用通配而不是逐个列文件名：列名字的话**每加一个 launch 都得记得回来改这里**，
+            #    忘了就是 `file 'xxx.launch.py' was not found in the share directory`
+            #    （实测踩过：`pose_chain.launch.py` 就是这么漏的）。
+            glob.glob("launch/*.launch.py"),
         ),
     ],
     install_requires=["setuptools"],

@@ -163,9 +163,13 @@ class MoveItAdapter : public rclcpp::Node {
     position.header = target.header;
     position.link_name = end_effector_link_;
     position.constraint_region.primitives.resize(1);
-    position.constraint_region.primitives[0].type = shape_msgs::msg::SolidPrimitive::SPHERE;
-    position.constraint_region.primitives[0]
-        .dimensions[shape_msgs::msg::SolidPrimitive::SPHERE_RADIUS] = position_tolerance_;
+    // ⚠️ `primitives.resize(1)` 只保证那个 primitive 存在，**不保证它内部的 dimensions
+    //    有长度**。少下面这一句，再往下标写就是往空容器里写 ⇒ **段错误**（实测栽过：
+    //    gdb 的栈顶就是 toConstraints）。
+    auto& primitive = position.constraint_region.primitives[0];
+    primitive.type = shape_msgs::msg::SolidPrimitive::SPHERE;
+    primitive.dimensions.resize(3, 0.0);
+    primitive.dimensions[shape_msgs::msg::SolidPrimitive::SPHERE_RADIUS] = position_tolerance_;
     position.constraint_region.primitive_poses.resize(1);
     position.constraint_region.primitive_poses[0] = target.pose;
     position.weight = 1.0;

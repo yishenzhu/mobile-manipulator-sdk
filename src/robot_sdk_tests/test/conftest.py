@@ -23,7 +23,9 @@ from lifecycle_msgs.srv import GetState
 from rclpy.action import ActionClient
 from sensor_msgs.msg import JointState
 
-from robot_sdk_interfaces.action import MoveToJointPositions, NavigateToPose
+from robot_sdk_interfaces.action import MoveToJointPositions, MoveToPose, NavigateToPose
+
+ADAPTER_POSE = "/sdk/move_to_pose"
 
 MOCK_EXE = os.path.join(get_package_prefix("robot_sdk_sim"), "lib", "robot_sdk_sim",
                         "mock_robot_node")
@@ -87,6 +89,34 @@ def motion_chain():
     finally:
         # SIGINT 而不是 kill：`ros2 launch` 是进程管理器，收到 SIGINT 会把子进程
         # 一起带走（实测过）。上面那条 killpg 才是兜底 —— 别指望它先走到。
+        proc.send_signal(signal.SIGINT)
+        try:
+            proc.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            os.killpg(proc.pid, signal.SIGKILL)
+            proc.wait(timeout=5)
+
+
+@pytest.fixture(scope="module")
+def pose_chain():
+    """起"假 move_group + 适配器"，返回适配器那个动作名，供 test_pose.py 用。"""
+    # 自成进程组（理由和 motion_chain 一样：只 kill 自己会把孩子变孤儿）。
+    proc = subprocess.Popen(["ros2", "launch", "robot_sdk_tests",
+                             "pose_chain.launch.py"], start_new_session=True)
+    try:
+        # 这条链路**没有**那种"服务端在了但还不能干活"的前置：适配器构造好就 advertise，
+        # 假 move_group 也是，不需要等任何数据流（motion_chain 要等 /joint_states，
+        # 导航要等生命周期 —— 那两条才需要额外判据）。
+        rclpy.init()
+        try:
+            node = rclpy.create_node("wait_for_moveit_adapter")
+            client = ActionClient(node, MoveToPose, ADAPTER_POSE)
+            assert client.wait_for_server(timeout_sec=40.0), f"等不到 {ADAPTER_POSE}"
+        finally:
+            rclpy.shutdown()
+
+        yield ADAPTER_POSE
+    finally:
         proc.send_signal(signal.SIGINT)
         try:
             proc.wait(timeout=15)
