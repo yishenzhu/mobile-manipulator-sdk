@@ -78,12 +78,14 @@ def check(action_name="/sdk/navigate_to_pose"):
         assert probe.client.wait_for_server(timeout_sec=30.0), \
             f"等不到动作服务端 {action_name}"
 
+        start = probe.pose()
         # 先回原点：不这么做的话，"走了多远"就取决于上一摊把机器人留在哪
         # （`probe_accel` 就在这上面栽过一次）。
-        print("  先回原点...")
-        assert probe.go(HOME).success, "回原点失败"
-
-        start = probe.pose()
+        # **已经在原点就跳过** —— 原地不动的目标 Nav2 有时会判失败，那和"回没回到"无关。
+        if math.dist(start, HOME) > TOLERANCE:
+            print(f"  先回原点（现在在 ({start[0]:.2f}, {start[1]:.2f})）...")
+            assert probe.go(HOME).success, "回原点失败"
+            start = probe.pose()
         print(f"  起点 ({start[0]:.2f}, {start[1]:.2f}) → 目标 {GOAL}")
 
         result = probe.go(GOAL)

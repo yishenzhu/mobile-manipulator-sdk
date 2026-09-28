@@ -13,25 +13,31 @@
 
   <buildtool_depend>ament_python</buildtool_depend>
 
-  <exec_depend>rclpy</exec_depend>
-  <exec_depend>sensor_msgs</exec_depend>
-  <exec_depend>nav_msgs</exec_depend>
-  <exec_depend>tf2_ros</exec_depend>
-  <exec_depend>robot_sdk_interfaces</exec_depend>
-  <!-- 探针的对面是"机器人"，所以要能把它起起来。注意它们**不走 SDK** ——
+  <!-- 这个包**整包只有测试**：模块是探针（`check()`），fixture 负责把被验的东西起起来。
+       所以下面这些都是 test_depend —— 它们不该出现在"部署这个包"的依赖里。
+       唯一的例外见最后两行。 -->
+  <test_depend>rclpy</test_depend>
+  <test_depend>sensor_msgs</test_depend>
+  <test_depend>nav_msgs</test_depend>
+  <test_depend>tf2_ros</test_depend>
+  <test_depend>robot_sdk_interfaces</test_depend>
+  <!-- 被验的东西，由 fixture 起起来。注意探针**不走 SDK** ——
        用的是裸 action 接口（robot_sdk_interfaces），这样看机器人侧的行为更直接；
        "SDK 用起来对不对"由 robot_sdk_examples 那三个 C++ 示例负责。 -->
-  <exec_depend>robot_sdk_sim</exec_depend>
-  <exec_depend>robot_sdk_bridge</exec_depend>
-  <exec_depend>launch</exec_depend>
-  <exec_depend>launch_ros</exec_depend>
+  <test_depend>robot_sdk_sim</test_depend>
+  <test_depend>robot_sdk_bridge</test_depend>
+  <!-- 被验的整栈：navigation.launch.py 来自它。 -->
+  <test_depend>robot_sdk_nav2</test_depend>
 
   <!-- 探针的本体是 check()（不符合预期就 assert），test/ 里把它们当 pytest 跑。
        起不来 = error，判据不对 = failure —— colcon test-result 里天生分开。 -->
   <test_depend>python3-pytest</test_depend>
   <test_depend>ament_index_python</test_depend>
-  <!-- 被验的整栈：navigation.launch.py 来自它。 -->
-  <test_depend>robot_sdk_nav2</test_depend>
+
+  <!-- ⚠️ 这两个留在 exec：本包**装了**一个 launch 文件（motion_chain.launch.py），
+       装出来的东西得能 `ros2 launch` 起来 —— 那是运行期依赖，不是测试依赖。 -->
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
 
   <export>
     <build_type>ament_python</build_type>

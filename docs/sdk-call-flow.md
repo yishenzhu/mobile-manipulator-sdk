@@ -758,10 +758,16 @@ const T& valueOr(const T& fallback) const;// 失败时给兜底值
 
 | # | 事项 | 为什么 / 怎么做 | 相关 |
 |---|---|---|---|
-| 1 | **依赖分档** | `robot_sdk_tests` 里 `robot_sdk_sim` / `robot_sdk_bridge` 写成了 `exec_depend`，其实**只有测试用**（是 fixture 把它们起起来的）—— 应该是 `test_depend` | `package.xml` |
-| 2 | **URDF** | 现在关节就是"一串名字 + 一串弧度"，**没有类型、没有单位、没有限位**。URDF 能把这些说清楚（连续关节 / 有限位的关节 / 速度加速度上限），适配器里那些硬编码也就有了出处 | §3.5 §7.2.1 |
-| 3 | **SDK 加笛卡尔目标支持** | 现在只有 `MoveToJointPositions`（点名关节角）。要"把夹爪移到 (x, y, z)"，得先有这个目标类型 —— 顺带也需要 TF 反馈 | §3.5 |
-| 4 | **MoveIt 适配器** | 有了笛卡尔目标之后，逆解与规划就是 MoveIt 的活。它**同样讲 `FollowJointTrajectory`**，所以客户代码不用动，照着 `motion_adapter` 再写一个即可 | §3.5 |
+| 1 | **URDF** | 现在关节就是"一串名字 + 一串弧度"，**没有类型、没有单位、没有限位**。URDF 能把这些说清楚（连续关节 / 有限位的关节 / 速度加速度上限），适配器里那些硬编码也就有了出处 | §3.5 §7.2.1 |
+| 2 | **SDK 加笛卡尔目标支持** | 现在只有 `MoveToJointPositions`（点名关节角）。要"把夹爪移到 (x, y, z)"，得先有这个目标类型 —— 顺带也需要 TF 反馈 | §3.5 |
+| 3 | **MoveIt 适配器** | 有了笛卡尔目标之后，逆解与规划就是 MoveIt 的活。它**同样讲 `FollowJointTrajectory`**，所以客户代码不用动，照着 `motion_adapter` 再写一个即可 | §3.5 |
+
+**已办**：
+
+- ✅ **依赖分档** —— `robot_sdk_tests` **整包只有测试**（模块是探针、fixture 负责把被验的东西
+  起起来），所以依赖全挪成了 `test_depend`。**两个例外**：`launch` / `launch_ros` 留在
+  `exec_depend` —— 那个包装了一个 launch 文件，装出来的东西得能 `ros2 launch` 起来，
+  那是运行期依赖。其余六个包对着用法核过，分档都对。
 
 **不在上面这条线上的**：pybind11 绑定（`robot_sdk_py`）、Gazebo。
 
