@@ -44,7 +44,9 @@ struct MotionConfig {
   double default_timeout_s{30.0};
   std::map<std::string, std::vector<double>> named_targets{};
   std::string gripper_joint{"gripper_joint"};
-  double gripper_open_position{0.04};
+  /// ⚠️ 默认值必须落在**参考机器人夹爪的行程内**（URDF 的 `gripper_joint` 是 [0, 0.03]）。
+  /// 超出会被执行侧当场拒收（实测 0.04 拒、0.03 收）—— 所以别凭"4 cm 才像张开"去调它。
+  double gripper_open_position{0.03};
   double gripper_closed_position{0.0};
   /// 夹爪动作的超时。夹爪行程短、动作快，所以**独立于 default_timeout_s** ——
   /// 用通用的 30 秒去等一个夹爪动作，卡住时要干等半分钟。

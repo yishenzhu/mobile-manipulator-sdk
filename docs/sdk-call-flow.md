@@ -392,9 +392,9 @@ config.navigation.action_name = "sdk/navigate_to_pose";   // 就这一行
 
 而且它是**相对于该关节自己的"零位"**，不是编码器原始值。
 
-我们这套的 5 个关节就**混着两种**：`shoulder_pan` / `shoulder_lift` / `elbow` / `wrist` 是旋转关节（弧度），
-**`gripper_joint` 是移动关节（米）** —— 依据是配置里的 `gripper_open_position: 0.04`：
-4 厘米才像"张开"，0.04 弧度只有 2.3°，不像。
+我们这套的 7 个关节混着两种：`shoulder_pan` / `shoulder_lift` / `elbow` / `wrist` /
+`wrist_pitch` / `wrist_roll` 是旋转关节（弧度），**`gripper_joint` 是移动关节（米）** ——
+依据是配置里的 `gripper_open_position: 0.03`：3 厘米才像"张开"，0.03 弧度只有 1.7°，不像。
 
 > 所以适配器**不能假定单位**。`motion_adapter` 里没有一处 `sin` / `cos` / `atan2` ——
 > 公式只要求 `Δ` 和 `a` **单位一致**，换成移动关节一行都不用改。

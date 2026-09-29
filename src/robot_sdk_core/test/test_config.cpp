@@ -31,6 +31,9 @@ TEST(ConfigTest, NestedStructsAreDefaultConstructed) {
   EXPECT_TRUE(cfg.node_namespace.empty());       // 空 string
   EXPECT_FALSE(cfg.use_sim_time);
   EXPECT_EQ(cfg.motion.gripper_closed_position, 0.0);
+  // ⚠️ 必须落在参考机器人夹爪的行程内（URDF 的 gripper_joint 是 [0, 0.03]）。
+  // 高一点（0.04）就会被执行侧当场拒收 —— 实测过。
+  EXPECT_DOUBLE_EQ(cfg.motion.gripper_open_position, 0.03);
   EXPECT_DOUBLE_EQ(cfg.motion.gripper_timeout_s, 5.0);  // 独立于 default_timeout_s
 }
 

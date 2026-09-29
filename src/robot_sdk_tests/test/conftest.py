@@ -225,51 +225,91 @@ def pose_chain():
             proc.wait(timeout=5)
 
 
+# Nav2 整栈的 bring-up 偶发失败（实测约 1/N）：生命周期转换的**响应**会丢，
+# bt_navigator 就停在 inactive。所以单次等待设上限 + 失败重来一次。
+NAV2_ATTEMPTS = 2
+NAV2_READY_TIMEOUT_S = 60.0
+# 出现它就说明这次 bring-up 已经**注定失败**，再等只是白等。
+# ⚠️ 只放**实测见过**的签名 —— 猜的标记万一在健康启动时误命中，反而引入假失败。
+NAV2_DEAD_MARKERS = ("failed to send response to",)
+
+
 @pytest.fixture(scope="module")
 def navigation():
     """起 Nav2 整栈（mock + nav2_adapter + Nav2 + map_server），返回适配器的动作名。"""
-    # 整栈有十来个节点，日志能把 pytest 的输出淹掉 —— 写文件里，出事了看消息里的路径。
-    log = tempfile.NamedTemporaryFile(prefix="nav2_launch_", suffix=".log", delete=False)
-    proc = subprocess.Popen(["ros2", "launch", "robot_sdk_nav2", "navigation.launch.py"],
-                            start_new_session=True, stdout=log, stderr=subprocess.STDOUT)
-    try:
-        # 等到"真能导航"为止，而不是"服务端在"：动作服务端在节点构造时就 advertise
-        # 了，**不代表生命周期激活完成**。代价地图是 planner/controller 激活之后才发的，
-        # 拿它当"能干活"的信号。（mock_robot 那次栽在同一类假设上。）
-        rclpy.init()
-        try:
-            node = rclpy.create_node("wait_for_nav2")
-            client = ActionClient(node, NavigateToPose, ADAPTER_NAVIGATION)
-            assert client.wait_for_server(timeout_sec=60.0), \
-                f"等不到 {ADAPTER_NAVIGATION}（日志：{log.name}）"
+    attempts = []
 
-            # ⚠️ 判据必须问**生命周期**，不能看代价地图有没有帧：那帧是 latch 的，早于全栈
-            # 就绪就存在 ⇒ 用它会让探针提前放行，撞上还在 activating 的 bt_navigator
-            # （"Action server is inactive"）⇒ 整栈 abort。判据就是 bt_navigator 到 active。
-            state_client = node.create_client(GetState, "/bt_navigator/get_state")
-            assert state_client.wait_for_service(timeout_sec=60.0), \
-                f"等不到 /bt_navigator/get_state（日志：{log.name}）"
-            deadline = time.monotonic() + 90.0
-            state = ""
-            while time.monotonic() < deadline:
-                future = state_client.call_async(GetState.Request())
-                rclpy.spin_until_future_complete(node, future, timeout_sec=5.0)
-                if future.done() and future.result() is not None:
-                    state = future.result().current_state.label
-                    if state == "active":
-                        break
-                time.sleep(0.2)
-            assert state == "active", \
-                f"bt_navigator 没到 active（当前 {state or '未知'}，日志：{log.name}）"
-        finally:
-            rclpy.shutdown()
-
-        yield ADAPTER_NAVIGATION
-    finally:
+    def stop(proc):
+        """SIGINT 整组 + KILL 兜底。拆卸不许抛 —— 抛了报告里多一条 error。"""
+        if proc.poll() is not None:
+            return
         proc.send_signal(signal.SIGINT)
         try:
             proc.wait(timeout=20)
         except subprocess.TimeoutExpired:
             os.killpg(proc.pid, signal.SIGKILL)
             proc.wait(timeout=5)
-        log.close()
+
+    try:
+        # 整栈有十来个节点，日志能把 pytest 输出淹掉 —— 写文件，出事时消息里带路径。
+        ready_log = ""
+        for attempt in range(1, NAV2_ATTEMPTS + 1):
+            log = tempfile.NamedTemporaryFile(prefix="nav2_launch_", suffix=".log",
+                                              delete=False)
+            proc = subprocess.Popen(["ros2", "launch", "robot_sdk_nav2",
+                                     "navigation.launch.py"],
+                                    start_new_session=True, stdout=log,
+                                    stderr=subprocess.STDOUT)
+            attempts.append((proc, log))
+            why = ""
+
+            rclpy.init()
+            try:
+                node = rclpy.create_node("wait_for_nav2")
+                # 动作服务端在节点构造时就 advertise 了 ⇒ 它"在"≠"能干活"。
+                client = ActionClient(node, NavigateToPose, ADAPTER_NAVIGATION)
+                if not client.wait_for_server(timeout_sec=60.0):
+                    why = f"等不到 {ADAPTER_NAVIGATION}"
+                else:
+                    # ⚠️ 判据要问**生命周期**，不能看代价地图有没有帧：那帧是 latch 的，
+                    # 早于全栈就绪就存在 ⇒ 用它会让探针撞上还在 activating 的 bt_navigator
+                    # （"Action server is inactive"）⇒ 整栈 abort。真判据就是到 active。
+                    state_client = node.create_client(GetState, "/bt_navigator/get_state")
+                    if not state_client.wait_for_service(timeout_sec=60.0):
+                        why = "等不到 /bt_navigator/get_state"
+                    else:
+                        deadline, state = time.monotonic() + NAV2_READY_TIMEOUT_S, ""
+                        while time.monotonic() < deadline:
+                            if proc.poll() is not None:
+                                why = f"整栈进程已退出（exit={proc.returncode}）"
+                                break
+                            with open(log.name, errors="replace") as dump:
+                                hit = next((m for m in NAV2_DEAD_MARKERS if m in dump.read()), "")
+                            if hit:
+                                why = f"日志出现 '{hit}'（转换响应丢了）"
+                                break
+                            future = state_client.call_async(GetState.Request())
+                            rclpy.spin_until_future_complete(node, future, timeout_sec=5.0)
+                            if future.done() and future.result() is not None:
+                                state = future.result().current_state.label
+                                if state == "active":
+                                    break
+                            time.sleep(0.2)
+                        if not why and state != "active":
+                            why = f"bt_navigator 停在 {state or '未知'}"
+            finally:
+                rclpy.shutdown()
+
+            if not why:
+                ready_log = log.name
+                break
+            print(f"⚠️ Nav2 bring-up 第 {attempt}/{NAV2_ATTEMPTS} 次没起来：{why}")
+            stop(proc)  # 必须停干净再重试 —— 否则两个整栈同时在跑（同名服务端）
+
+        assert ready_log, (f"Nav2 连试 {NAV2_ATTEMPTS} 次都没到 active"
+                           f"（日志：{attempts[-1][1].name}）")
+        yield ADAPTER_NAVIGATION
+    finally:
+        for proc, log in attempts:
+            stop(proc)
+            log.close()

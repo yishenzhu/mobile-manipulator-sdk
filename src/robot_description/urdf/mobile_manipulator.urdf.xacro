@@ -7,6 +7,14 @@
        Both are rendering-based, so they need a working GPU/EGL context. -->
   <xacro:arg name="enable_camera" default="true"/>
 
+  <!-- 硬件插件二选一：mock = 假硬件（测试用，命令即状态）；gazebo = 真仿真（gz_ros2_control）。
+       ⚠️ 默认必须是 mock —— 那才是 `colcon test` 走的那条路。 -->
+  <xacro:arg name="hardware" default="mock"/>
+  <!-- gazebo 模式下交给 gz_ros2_control 的 gazebo 插件读的控制器配置。
+       ⚠️ 默认**留空**、由 launch 传绝对路径 —— 这里写 $(find robot_description) 会在
+       构建这个包自己时抛 PackageNotFoundError（那时它还不在 ament 索引里）。 -->
+  <xacro:arg name="ros2_control_params" default=""/>
+
   <xacro:property name="PI" value="3.14159265359"/>
   <xacro:property name="base_length" value="0.42"/>
   <xacro:property name="base_width" value="0.36"/>
@@ -469,19 +477,23 @@
       <child_frame_id>base_footprint</child_frame_id>
       <odom_publish_frequency>50</odom_publish_frequency>
     </plugin>
-    <plugin filename="gz-sim-joint-state-publisher-system"
-            name="gz::sim::systems::JointStatePublisher">
-      <topic>/joint_states</topic>
-      <joint_name>left_wheel_joint</joint_name>
-      <joint_name>right_wheel_joint</joint_name>
-      <joint_name>shoulder_pan_joint</joint_name>
-      <joint_name>shoulder_lift_joint</joint_name>
-      <joint_name>elbow_joint</joint_name>
-      <joint_name>wrist_joint</joint_name>
-      <joint_name>wrist_pitch_joint</joint_name>
-      <joint_name>wrist_roll_joint</joint_name>
-      <joint_name>gripper_joint</joint_name>
-    </plugin>
+    <!-- ⚠️ gazebo 模式下由 ros2_control 的 joint_state_broadcaster 发 /joint_states，
+         这里不能再发一份 —— 两个源发同一批关节会打架。 -->
+    <xacro:unless value="${'$(arg hardware)' == 'gazebo'}">
+      <plugin filename="gz-sim-joint-state-publisher-system"
+              name="gz::sim::systems::JointStatePublisher">
+        <topic>/joint_states</topic>
+        <joint_name>left_wheel_joint</joint_name>
+        <joint_name>right_wheel_joint</joint_name>
+        <joint_name>shoulder_pan_joint</joint_name>
+        <joint_name>shoulder_lift_joint</joint_name>
+        <joint_name>elbow_joint</joint_name>
+        <joint_name>wrist_joint</joint_name>
+        <joint_name>wrist_pitch_joint</joint_name>
+        <joint_name>wrist_roll_joint</joint_name>
+        <joint_name>gripper_joint</joint_name>
+      </plugin>
+    </xacro:unless>
     <plugin filename="gz-sim-imu-system" name="gz::sim::systems::Imu"/>
   </gazebo>
 
@@ -494,13 +506,27 @@
     </plugin>
   </gazebo>
 
-  <xacro:arm_position_controller joint="shoulder_pan_joint"/>
-  <xacro:arm_position_controller joint="shoulder_lift_joint"/>
-  <xacro:arm_position_controller joint="elbow_joint"/>
-  <xacro:arm_position_controller joint="wrist_joint"/>
-  <xacro:arm_position_controller joint="wrist_pitch_joint"/>
-  <xacro:arm_position_controller joint="wrist_roll_joint"/>
-  <xacro:arm_position_controller joint="gripper_joint"/>
+  <!-- ⚠️ 这些 gz 关节位置控制器只在 mock 模式下保留；gazebo 模式下手臂归 ros2_control，
+       两份一起放进 Gazebo 会**抢同一个关节**。 -->
+  <xacro:unless value="${'$(arg hardware)' == 'gazebo'}">
+    <xacro:arm_position_controller joint="shoulder_pan_joint"/>
+    <xacro:arm_position_controller joint="shoulder_lift_joint"/>
+    <xacro:arm_position_controller joint="elbow_joint"/>
+    <xacro:arm_position_controller joint="wrist_joint"/>
+    <xacro:arm_position_controller joint="wrist_pitch_joint"/>
+    <xacro:arm_position_controller joint="wrist_roll_joint"/>
+    <xacro:arm_position_controller joint="gripper_joint"/>
+  </xacro:unless>
+
+  <!-- gazebo 模式：这个 gz 插件自己会把 controller_manager 建起来（不用另起 ros2_control_node）。 -->
+  <xacro:if value="${'$(arg hardware)' == 'gazebo'}">
+    <gazebo>
+      <plugin filename="gz_ros2_control-system"
+              name="gz_ros2_control::GazeboSimROS2ControlPlugin">
+        <parameters>$(arg ros2_control_params)</parameters>
+      </plugin>
+    </gazebo>
+  </xacro:if>
 
   <gazebo reference="laser_link">
     <sensor name="lidar" type="gpu_lidar">
@@ -567,11 +593,17 @@
   </gazebo>
   </xacro:if>
   <!-- ============================ ros2_control ============================= -->
-  <!-- 给 ros2_control 用的：声明关节、接口、硬件插件。用 mock_components/GenericSystem
-       假硬件（命令即状态，不需要 Gazebo）。只声明要控的 7 个关节，车轮没人控。 -->
+  <!-- 给 ros2_control 用的：声明关节、接口、硬件插件，只声明要控的 7 个（车轮没人控）。
+       ⚠️ 插件由 `hardware` 参数二选一 —— 默认 mock（假硬件，命令即状态，不需要 Gazebo）；
+       gazebo 模式换成 gz_ros2_control，那时 MoveIt 才能**真的**驱动仿真里的机器人。 -->
   <ros2_control name="mobile_manipulator" type="system">
     <hardware>
-      <plugin>mock_components/GenericSystem</plugin>
+      <xacro:if value="${'$(arg hardware)' == 'gazebo'}">
+        <plugin>gz_ros2_control/GazeboSimSystem</plugin>
+      </xacro:if>
+      <xacro:unless value="${'$(arg hardware)' == 'gazebo'}">
+        <plugin>mock_components/GenericSystem</plugin>
+      </xacro:unless>
     </hardware>
     <joint name="shoulder_pan_joint">
       <command_interface name="position"/>
