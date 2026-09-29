@@ -12,11 +12,18 @@
 -->
 <robot name="mobile_manipulator">
 
-  <!-- 机械臂：四个 revolute 关节连成一条链。
-       ⚠️ chain 必须**连续**：从 arm_base_link 一路到 wrist_link，中间不能有分叉。
-         底盘那几个关节（车轮/caster）不属于它。 -->
+  <!-- 机械臂：四个 revolute 关节（外加末那条 fixed 的 gripper_base_joint）连成一条链。
+       ⚠️ chain 必须**连续**：从 arm_base_link 一路到 tip_link，中间不能有分叉。
+
+       ⚠️⚠️ tip_link 必须是「末端真正待的那个连杆」——
+          **不能**是 wrist_link 就完事：IK 采样器要解到 tip，
+          而如果 tip 在组的**外面**（比如 gripper_base_link 隔着一条 fixed 关节），
+          KDL 就**采不出任何状态**，表现为 OMPL 报
+          `Unable to sample any valid states for goal tree` —— **而且连"可达点"也报**，
+          看起来特别像"够不着"，实测栽过。
+          ⇒ 把 tip 放到 gripper_base_link 上，那条 fixed 关节会被 chain 一起纳入。 -->
   <group name="arm">
-    <chain base_link="arm_base_link" tip_link="wrist_link"/>
+    <chain base_link="arm_base_link" tip_link="gripper_base_link"/>
   </group>
 
   <!-- 夹爪：只有一个可动关节（prismatic）。
@@ -28,12 +35,38 @@
 
   <!-- 末端执行器：告诉 MoveIt「夹爪挂在手臂末端」。
        parent_group=arm ⇒ 规划手臂时会把它一起带上。 -->
-  <end_effector name="gripper_ee" parent_link="wrist_link" group="gripper"
+  <end_effector name="gripper_ee" parent_link="gripper_base_link" group="gripper"
                 parent_group="arm"/>
 
-  <!-- ⚠️ 允许碰撞矩阵（disable_collisions）**先留空** —— 那是不做自碰撞检查。
-       它是白名单（"这些连杆本来就会互相碰"），不填只会更保守（慢一点、可能报
-       假碰撞），不会算错。等真跑起来按它实际报的碰撞往里加。 -->
+  <!-- 允许碰撞矩阵（disable_collisions）—— 白名单：**这些连杆对不算碰撞**。
+
+       ⚠️⚠️ 空着**不等于**"不检查碰撞"！空着就是按默认规则检查 ⇒ **天生相邻/几何重叠的
+          连杆全被判成碰撞** ⇒ OMPL 报 `Unable to sample any valid states for goal tree`，
+          而且**连 FK 算出来的可达位姿也报** —— 看起来特别像"够不着"，实测栽过。
+          （修之前先用 /check_state_validity 量了一次：那个姿态 valid=False，
+            碰撞对正是 shoulder_link<->upper_arm_link、forearm_link<->upper_arm_link。）
+
+       reason 的取值：Adjacent = 靠关节直接相连（正常，必然接触）；
+                     Always   = 几何上永远贴在一起（比如挂同一个支架上的传感器）。 -->
+  <disable_collisions link1="base_footprint"      link2="base_link"          reason="Adjacent"/>
+  <disable_collisions link1="base_link"           link2="left_wheel_link"    reason="Adjacent"/>
+  <disable_collisions link1="base_link"           link2="right_wheel_link"   reason="Adjacent"/>
+  <disable_collisions link1="base_link"           link2="caster_link"        reason="Adjacent"/>
+  <disable_collisions link1="base_link"           link2="laser_link"         reason="Adjacent"/>
+  <disable_collisions link1="base_link"           link2="imu_link"           reason="Adjacent"/>
+  <disable_collisions link1="base_link"           link2="camera_link"        reason="Adjacent"/>
+  <disable_collisions link1="base_link"           link2="arm_base_link"      reason="Adjacent"/>
+  <disable_collisions link1="arm_base_link"       link2="shoulder_link"      reason="Adjacent"/>
+  <disable_collisions link1="shoulder_link"       link2="upper_arm_link"     reason="Adjacent"/>
+  <disable_collisions link1="upper_arm_link"      link2="forearm_link"       reason="Adjacent"/>
+  <disable_collisions link1="forearm_link"        link2="wrist_link"         reason="Adjacent"/>
+  <disable_collisions link1="wrist_link"          link2="gripper_base_link"  reason="Adjacent"/>
+  <disable_collisions link1="gripper_base_link"   link2="left_finger_link"   reason="Adjacent"/>
+  <disable_collisions link1="gripper_base_link"   link2="right_finger_link"  reason="Adjacent"/>
+  <!-- 这两个传感器挂在同一处、几何本来就贴着 —— 不是"相邻"，是"永远接触"。 -->
+  <disable_collisions link1="camera_link"         link2="laser_link"         reason="Always"/>
+  <!-- ⚠️ 只列了**相邻的**和**实测到的**。其余"离得远、不可能碰"的组合没列 ——
+       不列只是保守（更慢、可能报假碰撞），不会算错。真报出来了再加。 -->
 
   <!-- 移动底盘的"世界锚点"。固定式机械臂通常把 base 焊在台上；
        我们是移动机器人 ⇒ 先用 fixed 把 world 接到 base_footprint，

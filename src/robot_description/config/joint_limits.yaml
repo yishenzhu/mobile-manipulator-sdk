@@ -1,14 +1,38 @@
-# MoveIt 的关节限值**覆盖**。
+# MoveIt 的**关节限位覆写**。
 #
-# ⚠️ 故意留空：不覆盖任何东西 ⇒ 一切按 URDF 里的 <limit> 走（我们的 URDF 有
-#    velocity，实测模拟器读的就是它）。要覆盖某个关节的限速/限位，在这里写：
+# ⚠️ 这个文件必须存在（哪怕是空的）—— 原因：`MoveItConfigsBuilder` 会去找它，
+#    找不到直接 `ParameterBuilderFileNotFoundError`。
 #
-#     joint_limits:
-#       shoulder_lift_joint:
-#         has_velocity_limits: true
-#         max_velocity: 1.0
+# ⚠️⚠️ 但它**不能是空的**：`AddTimeOptimalParameterization` 这个
+#    PlanningResponseAdapter 要**速度/加速度上限**才能给轨迹算时间。
+#    没有 ⇒ 它报 FAILURE ⇒ MoveIt 回 `MoveGroup` 的错误码 **99999**
+#    （注意：这个 99999 看着像"规划失败"，其实是"规划成功、后处理失败"）。
 #
-# ⚠️ 但**文件本身必须存在** —— `MoveItConfigsBuilder` 会去找 config/joint_limits.yaml，
-#    找不到直接让 launch 失败（实测：`ParameterBuilderFileNotFoundError`）。
-#    也就是说"不给就用 URDF 的"这种想法是错的：**得给一个空的**。
-joint_limits: {}
+# 数值口径：`max_velocity` 抄 URDF 的 `<limit velocity>`；`max_acceleration` URDF 里没有，
+# 按"能在一秒内加到额定速度"给一个同量级的保守值。
+joint_limits:
+  shoulder_pan_joint:
+    has_velocity_limits: true
+    max_velocity: 2.0
+    has_acceleration_limits: true
+    max_acceleration: 4.0
+  shoulder_lift_joint:
+    has_velocity_limits: true
+    max_velocity: 2.0
+    has_acceleration_limits: true
+    max_acceleration: 4.0
+  elbow_joint:
+    has_velocity_limits: true
+    max_velocity: 2.0
+    has_acceleration_limits: true
+    max_acceleration: 4.0
+  wrist_joint:
+    has_velocity_limits: true
+    max_velocity: 2.0
+    has_acceleration_limits: true
+    max_acceleration: 4.0
+  gripper_joint:
+    has_velocity_limits: true
+    max_velocity: 0.1
+    has_acceleration_limits: true
+    max_acceleration: 0.2

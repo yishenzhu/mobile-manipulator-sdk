@@ -1,19 +1,29 @@
 # MoveIt 的逆解配置：用哪个 IK 插件、给多少求解时间。
 #
-# 插件用 KDL —— 它是 MoveIt 自带的默认解算器（实测这个环境里
-# `libmoveit_kdl_kinematics_plugin.so` 就在），而且是数值解，不需要额外的求解器依赖。
+# 插件用 KDL —— MoveIt 自带的默认解算器，数值解，不需要额外依赖。
 #
-# ⚠️ 组名必须和 SRDF 里的 <group name="..."> 以及适配器的 planning_group 参数**一致** ——
+# ⚠️ 组名必须和 SRDF 的 <group name="..."> 以及适配器的 planning_group **一致** ——
 #    三处对不上 MoveIt 会直接说"没有这个组"。
 arm:
   kinematics_solver: kdl_kinematics_plugin/KDLKinematicsPlugin
+  # ⚠️ 我们这条手臂只有 **4 个 revolute 关节**，却要满足 6 维位姿目标。
+  #    KDL 对"欠自由度"会**报成功、却解不出那个位姿** ⇒ MoveIt 校验目标状态失败 ⇒
+  #    OMPL 报 `Unable to sample any valid states for goal tree`，
+  #    MoveIt 回 GOAL_STATE_INVALID(-27)。
+  #    position_only_ik 让 KDL **只满足位置、放开姿态** ⇒ 位置目标（any_orientation=true）能通，实测：
+  #    MoveGroup 返回 -4（CONTROL_FAILED，因为我们没配控制器）并给出 58 个轨迹点。
+  #
+  # ⚠️⚠️ 但它**把精确姿态这条路关上了**：关掉它（false）之后连
+  #    「位置+姿态」的目标也报 -27 —— 而且那个姿态是从 /compute_fk 取的、**本来就可达**。
+  #    根因是自由度：arm 组只有 4 个 revolute 关节，采样器抽到的 6 维位姿
+  #    几乎必然落在 4 维可达流形之外 ⇒ KDL 解不出 ⇒ GOAL_STATE_INVALID。
+  #    ⇒ 想真给姿态，得换能处理欠自由度的解算器（或把臂做成 6 DOF），不是调参数能解决的。
+  position_only_ik: true
   kinematics_solver_search_resolution: 0.005
   kinematics_solver_timeout: 0.05
-
 gripper:
-  # 夹爪是一个 prismatic 关节 —— 它没有"逆解"可言（平移不用迭代），
+  # 夹爪是一个 prismatic 关节 —— 没有"逆解"可言（平移不用迭代），
   # 但 MoveIt 要求每个组都有一条记录，缺了会在加载配置时抱怨。
-  # 给同一个数值解算器即可，实际不会用到。
   kinematics_solver: kdl_kinematics_plugin/KDLKinematicsPlugin
   kinematics_solver_search_resolution: 0.005
   kinematics_solver_timeout: 0.05
