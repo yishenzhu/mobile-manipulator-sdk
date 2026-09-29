@@ -7,10 +7,11 @@
 
 为什么不直接用 nav2_bringup/navigation_launch.py：它固定拉起 10 个节点
 （含 route/docking/collision_monitor/smoother），每个都要配参数，少一个就卡在
-生命周期里。这里只起本部署真正需要的四个 + 生命周期管理。
+生命周期里。这里只起本部署真正需要的**五个** + 生命周期管理。
 
-也不需要 SLAM / 地图 / amcl：mock 直接广播 map -> odom -> base_footprint，
-相当于"定位永远完美"。
+不需要 SLAM 和 amcl 来**定位**：mock 直接广播 map -> odom -> base_footprint，相当于
+"定位永远完美"。地图仍然是**预置**的（`maps/room.pgm`，按已知的房间尺寸生成），
+由 `map_server` 发给全局代价地图的 static_layer —— 所以它不是"不需要地图"。
 """
 
 import os
