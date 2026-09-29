@@ -28,7 +28,7 @@ TEST(ConfigTest, NestedStructsAreDefaultConstructed) {
   const RobotConfig cfg;
   EXPECT_TRUE(cfg.motion.joint_names.empty());    // 空 vector，不是未初始化的垃圾
   EXPECT_TRUE(cfg.motion.named_targets.empty());  // 空 map
-  EXPECT_TRUE(cfg.robot_namespace.empty());       // 空 string
+  EXPECT_TRUE(cfg.node_namespace.empty());       // 空 string
   EXPECT_FALSE(cfg.use_sim_time);
   EXPECT_EQ(cfg.motion.gripper_closed_position, 0.0);
   EXPECT_DOUBLE_EQ(cfg.motion.gripper_timeout_s, 5.0);  // 独立于 default_timeout_s
@@ -88,7 +88,7 @@ TEST_F(ConfigNodeTest, ReadsParameterOverridesFromLaunchFile) {
 TEST_F(ConfigNodeTest, ReadsEveryParameterGroup) {
   rclcpp::NodeOptions options;
   options.parameter_overrides({
-      rclcpp::Parameter("robot_namespace", "robot1"),
+      rclcpp::Parameter("node_namespace", "robot1"),
       // 字符串数组参数 —— 和标量是不同的代码路径
       rclcpp::Parameter("motion.joint_names", std::vector<std::string>{"joint_a", "joint_b"}),
       rclcpp::Parameter("motion.gripper_open_position", 0.08),
@@ -109,7 +109,7 @@ TEST_F(ConfigNodeTest, ReadsEveryParameterGroup) {
   EXPECT_EQ(cfg.perception.laser_scan_topic, "front/scan");
   EXPECT_EQ(cfg.perception.queue_depth, 3);
   EXPECT_EQ(cfg.status.status_topic, "health");
-  EXPECT_EQ(cfg.robot_namespace, "robot1");
+  EXPECT_EQ(cfg.node_namespace, "robot1");
   // 没覆盖的组保持默认
   EXPECT_EQ(cfg.status.get_status_service, "get_robot_status");
   EXPECT_EQ(cfg.perception.imu_topic, "imu");

@@ -20,6 +20,11 @@
   <xacro:property name="upper_arm_length" value="0.22"/>
   <xacro:property name="forearm_length" value="0.20"/>
   <xacro:property name="wrist_length" value="0.06"/>
+  <!-- 腕部后两个自由度各占一小段。加它们是为了把 arm 凑够 **6 个 revolute**：
+       只有 4 个的时候 KDL 解不出 6 维位姿（欠自由度），只能靠 position_only_ik
+       放弃姿态、只保位置。 -->
+  <xacro:property name="wrist_pitch_length" value="0.03"/>
+  <xacro:property name="wrist_roll_length" value="0.02"/>
   <xacro:property name="arm_radius" value="0.035"/>
 
   <!-- ================================ Inertia =============================== -->
@@ -313,6 +318,65 @@
     <dynamics damping="0.1" friction="0.0"/>
   </joint>
 
+  <!-- 腕部第 2、3 段：Z-Y-Z 球形腕，和 pan/lift/elbow 一起构成 6R。
+       ⚠️ 第 3 段轴必须是 Z：夹爪沿 +Z 装在这个法兰上，绕工具轴自转就是绕 Z。
+       ⚠️ pitch = 0 时第 1、3 段共线，是 Z-Y-Z 固有的奇异位形，不是建模错误。 -->
+  <link name="wrist_pitch_link">
+    <visual>
+      <origin xyz="0 0 ${wrist_pitch_length / 2.0}" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="${arm_radius * 0.7}" length="${wrist_pitch_length}"/>
+      </geometry>
+      <material name="orange">
+        <color rgba="0.9 0.45 0.1 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 ${wrist_pitch_length / 2.0}" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="${arm_radius * 0.7}" length="${wrist_pitch_length}"/>
+      </geometry>
+    </collision>
+    <xacro:cylinder_inertial mass="0.2" radius="${arm_radius * 0.7}"
+                              length="${wrist_pitch_length}"/>
+  </link>
+  <joint name="wrist_pitch_joint" type="revolute">
+    <parent link="wrist_link"/>
+    <child link="wrist_pitch_link"/>
+    <origin xyz="0 0 ${wrist_length}" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-1.6" upper="1.6" effort="10.0" velocity="2.0"/>
+    <dynamics damping="0.1" friction="0.0"/>
+  </joint>
+
+  <link name="wrist_roll_link">
+    <visual>
+      <origin xyz="0 0 ${wrist_roll_length / 2.0}" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="${arm_radius * 0.6}" length="${wrist_roll_length}"/>
+      </geometry>
+      <material name="grey">
+        <color rgba="0.35 0.37 0.40 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 ${wrist_roll_length / 2.0}" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="${arm_radius * 0.6}" length="${wrist_roll_length}"/>
+      </geometry>
+    </collision>
+    <xacro:cylinder_inertial mass="0.15" radius="${arm_radius * 0.6}"
+                              length="${wrist_roll_length}"/>
+  </link>
+  <joint name="wrist_roll_joint" type="revolute">
+    <parent link="wrist_pitch_link"/>
+    <child link="wrist_roll_link"/>
+    <origin xyz="0 0 ${wrist_pitch_length}" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-3.14" upper="3.14" effort="5.0" velocity="2.0"/>
+    <dynamics damping="0.05" friction="0.0"/>
+  </joint>
+
   <!-- ============================== Gripper ================================ -->
   <link name="gripper_base_link">
     <visual>
@@ -331,9 +395,9 @@
     <xacro:box_inertial mass="0.2" x="0.05" y="0.06" z="0.02"/>
   </link>
   <joint name="gripper_base_joint" type="fixed">
-    <parent link="wrist_link"/>
+    <parent link="wrist_roll_link"/>
     <child link="gripper_base_link"/>
-    <origin xyz="0 0 ${wrist_length + 0.01}" rpy="0 0 0"/>
+    <origin xyz="0 0 ${wrist_roll_length + 0.01}" rpy="0 0 0"/>
   </joint>
 
   <xacro:macro name="finger" params="prefix y">
@@ -414,6 +478,8 @@
       <joint_name>shoulder_lift_joint</joint_name>
       <joint_name>elbow_joint</joint_name>
       <joint_name>wrist_joint</joint_name>
+      <joint_name>wrist_pitch_joint</joint_name>
+      <joint_name>wrist_roll_joint</joint_name>
       <joint_name>gripper_joint</joint_name>
     </plugin>
     <plugin filename="gz-sim-imu-system" name="gz::sim::systems::Imu"/>
@@ -432,6 +498,8 @@
   <xacro:arm_position_controller joint="shoulder_lift_joint"/>
   <xacro:arm_position_controller joint="elbow_joint"/>
   <xacro:arm_position_controller joint="wrist_joint"/>
+  <xacro:arm_position_controller joint="wrist_pitch_joint"/>
+  <xacro:arm_position_controller joint="wrist_roll_joint"/>
   <xacro:arm_position_controller joint="gripper_joint"/>
 
   <gazebo reference="laser_link">
@@ -499,20 +567,8 @@
   </gazebo>
   </xacro:if>
   <!-- ============================ ros2_control ============================= -->
-  <!-- 这一块**不是**给 Gazebo 看的，是给 ros2_control 看的：它声明"这台机器有哪几个
-       关节、各暴露什么接口、由哪个硬件插件驱动"。
-
-       ⚠️ 用 `mock_components/GenericSystem` 当硬件 —— 它是 ros2_control 自带的**假硬件**：
-          写进 command_interface 的值直接出现在 state_interface 上（`calculate_dynamics`
-          默认 false ⇒ 命令即状态）。于是**不需要 Gazebo、不需要真机**，
-          整条 ros2_control 栈（controller_manager → joint_trajectory_controller）就能跑。
-          要换成真机，只改 `<plugin>` 那一行。
-
-       ⚠️ Gazebo 那一段（下面的 <gazebo> 标签）和这一块是**两套独立的方案**，
-          互不打扰：前者靠 gz-sim 的插件，后者靠 ros2_control。
-
-       ⚠️ 只声明确实要控的 5 个关节（4 个手臂 + 1 个夹爪）。
-          车轮是 continuous 且没人控它们，混进来只会让 /joint_states 多出两条无意义的 0。 -->
+  <!-- 给 ros2_control 用的：声明关节、接口、硬件插件。用 mock_components/GenericSystem
+       假硬件（命令即状态，不需要 Gazebo）。只声明要控的 7 个关节，车轮没人控。 -->
   <ros2_control name="mobile_manipulator" type="system">
     <hardware>
       <plugin>mock_components/GenericSystem</plugin>
@@ -530,6 +586,14 @@
       <state_interface name="position"/>
     </joint>
     <joint name="wrist_joint">
+      <command_interface name="position"/>
+      <state_interface name="position"/>
+    </joint>
+    <joint name="wrist_pitch_joint">
+      <command_interface name="position"/>
+      <state_interface name="position"/>
+    </joint>
+    <joint name="wrist_roll_joint">
       <command_interface name="position"/>
       <state_interface name="position"/>
     </joint>

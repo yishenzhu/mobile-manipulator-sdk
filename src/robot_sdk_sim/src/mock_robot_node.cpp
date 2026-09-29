@@ -171,11 +171,11 @@ MockRobotNode::MockRobotNode(const rclcpp::NodeOptions &options)
   timer_group_ =
       create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
 
-  // 关节：优先用配置里的；没配就给一套默认（参考平台是 4 轴臂）。
+  // 关节：优先用配置里的；没配就给一套默认（参考平台是 6 轴臂）。
   joint_names_ = config_.motion.joint_names;
   if (joint_names_.empty()) {
     joint_names_ = {"shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint",
-                    "wrist_joint"};
+                    "wrist_joint", "wrist_pitch_joint", "wrist_roll_joint"};
   }
   joint_positions_.assign(joint_names_.size(), 0.0);
   if (!config_.motion.gripper_joint.empty()) {

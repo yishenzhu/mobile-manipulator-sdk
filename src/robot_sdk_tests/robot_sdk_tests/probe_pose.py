@@ -19,7 +19,7 @@ from robot_sdk_interfaces.action import MoveToPose
 
 GOAL_TOPIC = "/fake_move_group/goal"
 GROUP = "arm"
-EE_LINK = "gripper_link"
+EE_LINK = "gripper_base_link"  # URDF 里的末端法兰（以前这里错写成 gripper_link，那个连杆不存在）
 POSITION_TOLERANCE = 0.01      # 和适配器的默认参数对齐
 
 

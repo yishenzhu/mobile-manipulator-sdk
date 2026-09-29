@@ -1,15 +1,6 @@
-# MoveIt 的**关节限位覆写**。
-#
-# ⚠️ 这个文件必须存在（哪怕是空的）—— 原因：`MoveItConfigsBuilder` 会去找它，
-#    找不到直接 `ParameterBuilderFileNotFoundError`。
-#
-# ⚠️⚠️ 但它**不能是空的**：`AddTimeOptimalParameterization` 这个
-#    PlanningResponseAdapter 要**速度/加速度上限**才能给轨迹算时间。
-#    没有 ⇒ 它报 FAILURE ⇒ MoveIt 回 `MoveGroup` 的错误码 **99999**
-#    （注意：这个 99999 看着像"规划失败"，其实是"规划成功、后处理失败"）。
-#
-# 数值口径：`max_velocity` 抄 URDF 的 `<limit velocity>`；`max_acceleration` URDF 里没有，
-# 按"能在一秒内加到额定速度"给一个同量级的保守值。
+# MoveIt 的**关节限位覆写**：给 `AddTimeOptimalParameterization` 算轨迹时间用。
+# ⚠️ 文件必须存在且**内容不能空**，新增关节也必须补 —— 缺了后处理会失败，
+#    MoveGroup 回 99999（看着像"规划失败"，其实是"规划成功、后处理失败"）。
 joint_limits:
   shoulder_pan_joint:
     has_velocity_limits: true
@@ -27,6 +18,17 @@ joint_limits:
     has_acceleration_limits: true
     max_acceleration: 4.0
   wrist_joint:
+    has_velocity_limits: true
+    max_velocity: 2.0
+    has_acceleration_limits: true
+    max_acceleration: 4.0
+  # 腕部后两段 —— 新增关节必须在这里补上（理由见文件头）。
+  wrist_pitch_joint:
+    has_velocity_limits: true
+    max_velocity: 2.0
+    has_acceleration_limits: true
+    max_acceleration: 4.0
+  wrist_roll_joint:
     has_velocity_limits: true
     max_velocity: 2.0
     has_acceleration_limits: true

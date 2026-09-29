@@ -14,7 +14,7 @@ from rclpy.node import Node
 from robot_sdk_interfaces.action import MoveToJointPositions
 
 JOINTS = ["shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint", "wrist_joint",
-          "gripper_joint"]
+          "wrist_pitch_joint", "wrist_roll_joint", "gripper_joint"]
 
 
 class Probe(Node):
@@ -54,12 +54,12 @@ def check(action_name="/sdk/move_to_joint_positions"):
         #    那是**对的**：限位归执行侧管。
         print("① 发一个慢目标（shoulder_lift 走 1.5 rad）...")
         first = probe.wait(probe.client.send_goal_async(
-            probe.goal([0.5, 1.5, 0.2, 0.0, 0.01], velocity=0.5, acceleration=1.0)))
+            probe.goal([0.5, 1.5, 0.2, 0.0, 0.0, 0.0, 0.01], velocity=0.5, acceleration=1.0)))
         assert first.accepted, "第一个目标该被接受"
 
         print("② 在它跑的时候再发一个 —— 应该被拒")
         second = probe.wait(probe.client.send_goal_async(
-            probe.goal([0.0, 0.0, 0.0, 0.0, 0.0], velocity=0.5, acceleration=1.0)))
+            probe.goal([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], velocity=0.5, acceleration=1.0)))
         assert not second.accepted, "忙时不该接受第二个目标"
 
         # ── ③ 取消 ──

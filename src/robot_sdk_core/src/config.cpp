@@ -37,8 +37,11 @@ RobotConfig RobotConfig::fromNode(rclcpp::Node &node) {
 
   // 用已有节点的名字，而不是默认的 "robot_sdk"。
   cfg.node_name = node.get_name();
-  cfg.robot_namespace =
-      declareAndGet<std::string>(node, "robot_namespace", cfg.robot_namespace);
+  // ⚠️ 这个参数只在**自建模式**下真的有用，而那个模式下又**没有节点**可以声明参数 ——
+  //    见 config.hpp 里 node_namespace 那一整段说明。之所以还留着，是为了让
+  //    "先拿个临时节点读参数、再 Robot(cfg) 自建"这条路走得通。
+  cfg.node_namespace =
+      declareAndGet<std::string>(node, "node_namespace", cfg.node_namespace);
   // 注意这里用的是 getExistingOrDeclare —— 见上面的说明。
   cfg.use_sim_time =
       getExistingOrDeclare<bool>(node, "use_sim_time", cfg.use_sim_time);

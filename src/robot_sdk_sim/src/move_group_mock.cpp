@@ -92,12 +92,9 @@ class MoveGroupMock : public rclcpp::Node {
     timer_ = create_wall_timer(std::chrono::duration<double>(delay_s_), [this, handle]() {
       timer_.reset();
 
-      // ⚠️ 关节点（Ctrl-C / SIGINT）时 rclcpp 会先把 action server 拆掉，而这个定时器
-      //    可能还挂在墙上。此时再去 succeed()/abort() 会抛
-      //        Asked to publish result for goal that does not exist
-      //    没人接这个异常 ⇒ std::terminate ⇒ SIGABRT（退出码 -6）。
-      //    症状很有迷惑性：进程是"崩"的，测试却被记成目标失败。
-      //    所以这里先确认上下文还在。
+      // ⚠️ 关节点时 rclcpp 会先拆掉 action server，而定时器可能还挂着；此时回结果会抛
+      //    "Asked to publish result for goal that does not exist" ⇒ terminate ⇒ SIGABRT。
+      //    所以先确认上下文还在（症状很迷惑：进程崩了，测试却记成目标失败）。
       if (!rclcpp::ok()) {
         return;
       }

@@ -10,8 +10,9 @@ RobotRuntime::RobotRuntime(const RobotConfig& config) : config_(config) {
   // 它决定了节点订阅哪个时间源，事后设置就来不及了。
   options.parameter_overrides({rclcpp::Parameter("use_sim_time", config_.use_sim_time)});
 
+  // 名字 + 命名空间，两个正交的参数（rclcpp::Node(name, namespace_, options)）。
   node_ = std::make_shared<rclcpp::Node>(config_.node_name,
-                                        normalizeNamespace(config_.robot_namespace), options);
+                                        normalizeNamespace(config_.node_namespace), options);
 
   // 关键：多线程执行器。默认的单线程执行器会把所有回调串成一条线。
   executor_ = std::make_shared<rclcpp::executors::MultiThreadedExecutor>();

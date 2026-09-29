@@ -1,15 +1,6 @@
-// 假的“关节轨迹控制器” —— ros2_control 的 joint_trajectory_controller 的替身。
-//
-// 它只说 **FollowJointTrajectory**，并且自己发 `/joint_states`。
-// 用途是验 SDK 的运动链路：`motion_adapter` 的下游就是它。
-// 真机上这个角色由 ros2_control 扮演（本机没装，所以有这个替身）。
-//
-// 行为刻意贴近真的控制器：
-//   · 轨迹首点必须贴合**当前状态**，否则拒收
-//   · 按 points 里的 `time_from_start` 逐点线性插值
-//   · 反馈里的 `desired` 报的是**此刻应该在哪**（轨迹上的插值点），不是最终目标
-//
-//   ros2 run robot_sdk_sim joint_trajectory_mock
+// FollowJointTrajectory 的**测试替身**（真机上是 ros2_control 的 joint_trajectory_controller）。
+// 单进程、纯 ROS 参数、时序确定 ⇒ 给 motion_chain 那条测试用；自己也发 /joint_states。
+// ⚠️ 动作名和真货重复，两个不能同时起。   ros2 run robot_sdk_sim joint_trajectory_mock
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -61,7 +52,7 @@ class JointTrajectoryMock : public rclcpp::Node {
     joint_states_topic_ = declare_parameter<std::string>("joint_states_topic", "/joint_states");
     joint_names_ = declare_parameter<std::vector<std::string>>(
         "joints", {"shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint", "wrist_joint",
-                   "gripper_joint"});
+                   "wrist_pitch_joint", "wrist_roll_joint", "gripper_joint"});
     positions_.assign(joint_names_.size(), 0.0);
 
     timer_group_ = create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
@@ -167,10 +158,8 @@ class JointTrajectoryMock : public rclcpp::Node {
       RCLCPP_WARN(get_logger(), "拒绝轨迹：一个点都没有");
       return rclcpp_action::GoalResponse::REJECT;
     }
-    // ⚠️ 按**名字**对齐，顺序不敏感 —— 实测 MoveIt 送出来的关节名是**按字母序**排的
-    //    （elbow, shoulder_lift, shoulder_pan, wrist），和我们本机的顺序不同。
-    //    真的 joint_trajectory_controller 也是按名字索引的；要求顺序完全一致
-    //    反而会把 MoveIt 自己发来的**合法**轨迹拒掉（今天就拒了，报的还是一句没用的"不符"）。
+    // ⚠️ 按**名字**对齐，顺序不敏感 —— MoveIt 送出的关节名是按字母序排的，和我们本机
+    //    顺序不同。真控制器也是按名字索引；要求顺序一致反而会拒掉**合法**轨迹（实测栽过）。
     std::vector<std::size_t> mapping;
     mapping.reserve(joint_names_.size());
     for (const std::string& name : joint_names_) {

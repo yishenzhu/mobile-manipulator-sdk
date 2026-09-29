@@ -142,14 +142,14 @@ config_.motion.action_name / joint_names / gripper_joint
 config_.status.status_topic / joint_states_topic / get_status_service
 ```
 
-而 `RobotConfig` 里的**客户端专属字段**（`node_name`、`robot_namespace`、`use_sim_time`、`default_timeout_s`、`named_targets`、`gripper_open_position/closed_position`、`server_wait_timeout_s`、`perception.*`）**mock 一个都没碰**。
+而 `RobotConfig` 里的**客户端专属字段**（`node_name`、`node_namespace`、`use_sim_time`、`default_timeout_s`、`named_targets`、`gripper_open_position/closed_position`、`server_wait_timeout_s`、`perception.*`）**mock 一个都没碰**。
 
 **所以 `RobotConfig` 是两种东西混在一起**：
 
 | 类别 | 例子 | 谁需要 |
 |---|---|---|
 | **契约**（两侧都要知道） | `navigation.global_frame`、`motion.action_name`、`status.status_topic`、`joint_names`、`goal_tolerance_m` | 客户 + mock + **将来的适配器** |
-| **客户端专属**（"我怎么用它"） | `node_name`、`robot_namespace`、`default_timeout_s`、`named_targets`、`gripper_open_position`… | 只有客户 |
+| **客户端专属**（"我怎么用它"） | `node_name`、`node_namespace`、`default_timeout_s`、`named_targets`、`gripper_open_position`… | 只有客户 |
 
 **后果**：§1.4 那条边界是**文档级的，不是机制级的** —— 编译器不管这件事。mock 完全可以写 `config_.navigation.default_timeout_s` 而没人拦；而且它为了 `RobotConfig::fromNode`（在 `config.cpp` 里）**链接了整个客户端库**。同类情况还有 `types.hpp`（纯 `inline` 几何工具）和 `detail/action_util.hpp`（`resultCodeToString`）—— 这两样**也不是客户端专属**。
 
@@ -187,7 +187,7 @@ status_pub_ = create_publisher<RobotStatus>(config_.status.status_topic, 10);
 
 - 话题名一律**相对**（`"robot_status"`），rcl 按节点命名空间展开。
 - 于是一份代码 + 不同 launch 参数 = `/robot1/...` 和 `/robot2/...` **两个独立机器人**。
-- **SDK 不去重复实现命名空间机制** —— 那是 ROS 2 内建的（`RobotConfig::robot_namespace` 只影响节点自身）。
+- **SDK 不去重复实现命名空间机制** —— 那是 ROS 2 内建的（`RobotConfig::node_namespace` 只影响节点自身）。
 
 ### 2.2 主线二：**"此刻的机器人"只有一个来源**
 

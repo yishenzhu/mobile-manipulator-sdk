@@ -5,12 +5,9 @@ from launch_ros.actions import Node
 
 
 def generate_launch_description():
-    # 注意：这里把命名空间交给**节点的 namespace**，而不是一个名为
-    # `robot_namespace` 的参数。
-    #
-    # 原因：SDK 不再自己拼话题名前缀（`RobotConfig::resolve()` 已删除），
-    # 而是依赖 rcl 按节点命名空间展开相对名。所以"换命名空间"的正确做法
-    # 就是让节点建在那个命名空间里 —— 参数传进去没用。
+    # 命名空间交给**节点的 namespace**，不是 `node_namespace` 参数：
+    # SDK 不再自己拼话题名前缀（`resolve()` 已删），相对名由 rcl 按节点命名空间展开，
+    # 所以必须让节点建在那个命名空间里 —— 参数传进去没用。
     return LaunchDescription(
         [
             DeclareLaunchArgument("namespace", default_value=""),

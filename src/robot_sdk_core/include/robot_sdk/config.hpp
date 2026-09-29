@@ -80,14 +80,12 @@ struct StatusConfig {
 };
 
 struct RobotConfig {
+  /// 自建节点时用的**节点名**。
   std::string node_name{"robot_sdk"};
-  /// 建节点时使用的命名空间（"robot1" 或 "/robot1" 都行）。
-  ///
-  /// 注意：它**只**影响节点的命名空间，不参与话题名拼接。
-  /// 相对话题名（"scan"）由 rcl 按节点命名空间自动展开成 "/robot1/scan" ——
-  /// 这是 ROS 2 的内建机制，SDK 不去重复实现它。
-  /// 寄生模式（客户提供节点）下本字段被忽略，命名空间由客户的节点决定。
-  std::string robot_namespace{};
+  /// 自建节点时用的**命名空间**（和 node_name 配对，两者正交，见 runtime.cpp）。
+  /// 它只影响节点的命名空间，不参与拼话题名 —— 相对名由 rcl 展开。
+  /// ⚠️ 和 node_name 一样只在自建模式下有用；寄生模式下被忽略。
+  std::string node_namespace{};
   bool use_sim_time{false};
 
   NavigationConfig navigation{};

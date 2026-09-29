@@ -30,7 +30,9 @@ def generate_launch_description():
                 output="screen",
                 parameters=[{
                     "planning_group": "arm",
-                    "end_effector_link": "gripper_link",
+                    # ⚠️ 必须是 URDF 里真存在的连杆。以前写的是 `gripper_link`（不存在），
+                    #    假 move_group 不校验才没露馅，换真 MoveIt 当场就报了。
+                    "end_effector_link": "gripper_base_link",
                 }],
             ),
         ]
