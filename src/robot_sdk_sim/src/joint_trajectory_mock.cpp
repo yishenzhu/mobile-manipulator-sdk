@@ -29,6 +29,22 @@
 
 namespace robot_sdk::sim {
 
+namespace {
+
+/// 把关节名列表拼成一行，用于错误信息（"收到 X / 本机 Y"）。
+std::string joinNames(const std::vector<std::string>& names) {
+  std::string out;
+  for (const std::string& name : names) {
+    if (!out.empty()) {
+      out += ", ";
+    }
+    out += name;
+  }
+  return out;
+}
+
+} // namespace
+
 using JtcAction = control_msgs::action::FollowJointTrajectory;
 
 class JointTrajectoryMock : public rclcpp::Node {
@@ -100,8 +116,9 @@ class JointTrajectoryMock : public rclcpp::Node {
     const double ratio = t1 > t0 ? std::clamp((t - t0) / (t1 - t0), 0.0, 1.0) : 1.0;
 
     for (std::size_t k = 0; k < positions_.size(); ++k) {
-      const double from = segment == 0 ? start_positions_[k] : points_[segment - 1].positions[k];
-      const double to = points_[segment].positions[k];
+      const double from = segment == 0 ? start_positions_[k]
+                                       : points_[segment - 1].positions[mapping_[k]];
+      const double to = points_[segment].positions[mapping_[k]];
       positions_[k] = from + (to - from) * ratio;
     }
 
@@ -119,7 +136,7 @@ class JointTrajectoryMock : public rclcpp::Node {
 
     if (t >= toSeconds(points_.back().time_from_start)) {
       for (std::size_t k = 0; k < positions_.size(); ++k) {
-        positions_[k] = points_.back().positions[k];
+        positions_[k] = points_.back().positions[mapping_[k]];
       }
       auto result = std::make_shared<JtcAction::Result>();
       result->error_code = JtcAction::Result::SUCCESSFUL;
@@ -150,9 +167,22 @@ class JointTrajectoryMock : public rclcpp::Node {
       RCLCPP_WARN(get_logger(), "拒绝轨迹：一个点都没有");
       return rclcpp_action::GoalResponse::REJECT;
     }
-    if (trajectory.joint_names != joint_names_) {
-      RCLCPP_WARN(get_logger(), "拒绝轨迹：关节名与本机不符");
-      return rclcpp_action::GoalResponse::REJECT;
+    // ⚠️ 按**名字**对齐，顺序不敏感 —— 实测 MoveIt 送出来的关节名是**按字母序**排的
+    //    （elbow, shoulder_lift, shoulder_pan, wrist），和我们本机的顺序不同。
+    //    真的 joint_trajectory_controller 也是按名字索引的；要求顺序完全一致
+    //    反而会把 MoveIt 自己发来的**合法**轨迹拒掉（今天就拒了，报的还是一句没用的"不符"）。
+    std::vector<std::size_t> mapping;
+    mapping.reserve(joint_names_.size());
+    for (const std::string& name : joint_names_) {
+      const auto it =
+          std::find(trajectory.joint_names.begin(), trajectory.joint_names.end(), name);
+      if (it == trajectory.joint_names.end()) {
+        RCLCPP_WARN(get_logger(), "拒绝轨迹：缺少本机关节 '%s'\n  收到 [%s]\n  本机 [%s]",
+                    name.c_str(), joinNames(trajectory.joint_names).c_str(),
+                    joinNames(joint_names_).c_str());
+        return rclcpp_action::GoalResponse::REJECT;
+      }
+      mapping.push_back(static_cast<std::size_t>(it - trajectory.joint_names.begin()));
     }
 
     bool busy = false;
@@ -164,13 +194,14 @@ class JointTrajectoryMock : public rclcpp::Node {
         // 真的控制器会检查"轨迹首点是否贴合当前状态" —— 不贴合就没法跟。
         start_positions_ = positions_;
         const auto& first = trajectory.points.front().positions;
-        for (std::size_t k = 0; k < first.size() && k < positions_.size(); ++k) {
-          if (std::abs(first[k] - positions_[k]) > kStartTolerance) {
+        for (std::size_t k = 0; k < mapping.size(); ++k) {
+          if (std::abs(first[mapping[k]] - positions_[k]) > kStartTolerance) {
             start_mismatch = true;
           }
         }
         if (!start_mismatch) {
           points_ = trajectory.points;
+          mapping_ = mapping;
           elapsed_s_ = 0.0;
           feedback_divider_ = 0;
           slot_.reserve();
@@ -223,6 +254,8 @@ class JointTrajectoryMock : public rclcpp::Node {
   std::vector<double> positions_;
   std::vector<double> start_positions_;
   std::vector<trajectory_msgs::msg::JointTrajectoryPoint> points_;
+  /// 收到的轨迹里，本机第 k 个关节排在它的第几个 —— 按名字对齐（顺序不敏感）。
+  std::vector<std::size_t> mapping_;
   double elapsed_s_{0.0};
   int feedback_divider_{0};
 };

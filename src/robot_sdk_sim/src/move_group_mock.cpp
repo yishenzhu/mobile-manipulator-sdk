@@ -91,6 +91,17 @@ class MoveGroupMock : public rclcpp::Node {
     // ② 等一会儿再回结果 —— 留出时间让探针验"取消"和"超时"。
     timer_ = create_wall_timer(std::chrono::duration<double>(delay_s_), [this, handle]() {
       timer_.reset();
+
+      // ⚠️ 关节点（Ctrl-C / SIGINT）时 rclcpp 会先把 action server 拆掉，而这个定时器
+      //    可能还挂在墙上。此时再去 succeed()/abort() 会抛
+      //        Asked to publish result for goal that does not exist
+      //    没人接这个异常 ⇒ std::terminate ⇒ SIGABRT（退出码 -6）。
+      //    症状很有迷惑性：进程是"崩"的，测试却被记成目标失败。
+      //    所以这里先确认上下文还在。
+      if (!rclcpp::ok()) {
+        return;
+      }
+
       {
         std::lock_guard<std::mutex> lock(mutex_);
         running_ = false;

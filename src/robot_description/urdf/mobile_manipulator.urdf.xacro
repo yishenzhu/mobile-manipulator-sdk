@@ -498,5 +498,45 @@
     </sensor>
   </gazebo>
   </xacro:if>
+  <!-- ============================ ros2_control ============================= -->
+  <!-- 这一块**不是**给 Gazebo 看的，是给 ros2_control 看的：它声明"这台机器有哪几个
+       关节、各暴露什么接口、由哪个硬件插件驱动"。
+
+       ⚠️ 用 `mock_components/GenericSystem` 当硬件 —— 它是 ros2_control 自带的**假硬件**：
+          写进 command_interface 的值直接出现在 state_interface 上（`calculate_dynamics`
+          默认 false ⇒ 命令即状态）。于是**不需要 Gazebo、不需要真机**，
+          整条 ros2_control 栈（controller_manager → joint_trajectory_controller）就能跑。
+          要换成真机，只改 `<plugin>` 那一行。
+
+       ⚠️ Gazebo 那一段（下面的 <gazebo> 标签）和这一块是**两套独立的方案**，
+          互不打扰：前者靠 gz-sim 的插件，后者靠 ros2_control。
+
+       ⚠️ 只声明确实要控的 5 个关节（4 个手臂 + 1 个夹爪）。
+          车轮是 continuous 且没人控它们，混进来只会让 /joint_states 多出两条无意义的 0。 -->
+  <ros2_control name="mobile_manipulator" type="system">
+    <hardware>
+      <plugin>mock_components/GenericSystem</plugin>
+    </hardware>
+    <joint name="shoulder_pan_joint">
+      <command_interface name="position"/>
+      <state_interface name="position"/>
+    </joint>
+    <joint name="shoulder_lift_joint">
+      <command_interface name="position"/>
+      <state_interface name="position"/>
+    </joint>
+    <joint name="elbow_joint">
+      <command_interface name="position"/>
+      <state_interface name="position"/>
+    </joint>
+    <joint name="wrist_joint">
+      <command_interface name="position"/>
+      <state_interface name="position"/>
+    </joint>
+    <joint name="gripper_joint">
+      <command_interface name="position"/>
+      <state_interface name="position"/>
+    </joint>
+  </ros2_control>
 
 </robot>

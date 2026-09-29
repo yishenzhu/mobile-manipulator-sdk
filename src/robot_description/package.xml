@@ -22,6 +22,15 @@
     <exec_depend>moveit_configs_utils</exec_depend>
     <exec_depend>moveit_ros_move_group</exec_depend>
 
+    <!-- ros2_control 那一套：URDF 里的 <ros2_control> 标签 + config/ros2_control.yaml
+         + launch/ros2_control.launch.py 一起构成"执行侧"。
+         ⚠️ 必须声明 —— `colcon test` 只把声明过的依赖放进测试环境（实测踩过）。 -->
+    <exec_depend>controller_manager</exec_depend>
+    <exec_depend>joint_state_broadcaster</exec_depend>
+    <exec_depend>joint_trajectory_controller</exec_depend>
+    <!-- 假硬件插件（mock_components/GenericSystem）住在 ros2_control 包里。 -->
+    <exec_depend>ros2_control</exec_depend>
+
     <export>
     <build_type>ament_cmake</build_type>
   </export>
