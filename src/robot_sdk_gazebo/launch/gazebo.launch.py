@@ -16,9 +16,8 @@ import yaml
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import (DeclareLaunchArgument, ExecuteProcess,
-                            IncludeLaunchDescription, RegisterEventHandler, TimerAction)
+                            IncludeLaunchDescription, TimerAction)
 from launch.conditions import IfCondition, UnlessCondition
-from launch.event_handlers import OnProcessExit
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import (Command, LaunchConfiguration, PathJoinSubstitution,
                                   PythonExpression)
@@ -33,13 +32,17 @@ def generate_launch_description():
     share = get_package_share_directory("robot_description")
     params_path = os.path.join(share, "config", "ros2_control.yaml")
 
-    # ⚠️ 和 ros2_control.launch.py 同一个道理：controller_manager 转发给控制器节点的那个
-    #    params_file 必须是**存在的绝对路径**，空值或相对路径会让控制器全部加载失败。
+    # ⚠️ 两处覆盖都必要：`params_file` 必须是**存在的绝对路径**（空/相对会让控制器全加载失败）；
+    #    `open_loop_control` 关掉 —— 假硬件那条必须开，但 Gazebo 有真实状态，开环会让控制器
+    #    **没等到位就报成功** ⇒ MoveIt 拿没稳定的状态校验下一条轨迹 ⇒ "start point deviates"。
     with open(params_path) as handle:
         config = yaml.safe_load(handle)
-    config.setdefault("controller_manager", {}).setdefault("ros__parameters", {})[
-        "params_file"
-    ] = params_path
+    controller_manager_params = config.setdefault("controller_manager", {}).setdefault(
+        "ros__parameters", {})
+    controller_manager_params["params_file"] = params_path
+    config.setdefault("arm_controller", {}).setdefault("ros__parameters", {})[
+        "open_loop_control"
+    ] = False
     fd, generated_params = tempfile.mkstemp(prefix="gz_ros2_control_", suffix=".yaml")
     with os.fdopen(fd, "w") as handle:
         yaml.safe_dump(config, handle)
@@ -104,13 +107,17 @@ def generate_launch_description():
     spawn_broadcaster = ExecuteProcess(
         cmd=["ros2", "run", "controller_manager", "spawner", "joint_state_broadcaster",
              "--controller-manager", "/controller_manager",
-             "--controller-manager-timeout", "60"],
+             "--controller-manager-timeout", "60",
+             "--service-call-timeout", "60",
+             "--switch-timeout", "60"],
         output="screen",
     )
     spawn_arm = ExecuteProcess(
         cmd=["ros2", "run", "controller_manager", "spawner", "arm_controller",
              "--controller-manager", "/controller_manager",
-             "--controller-manager-timeout", "60"],
+             "--controller-manager-timeout", "60",
+             "--service-call-timeout", "60",
+             "--switch-timeout", "60"],
         output="screen",
     )
 
@@ -131,10 +138,8 @@ def generate_launch_description():
         odom_tf,
         # 给 Gazebo 一点时间再请求生成机器人。
         TimerAction(period=4.0, actions=[spawn_robot]),
-        # 再等一会：要等机器人被生成、gz_ros2_control 才把 controller_manager 建起来。
-        TimerAction(period=12.0, actions=[spawn_broadcaster]),
-        # spawner 起完就退出 ⇒ 拿它的退出当"可以起下一个了"的信号。
-        RegisterEventHandler(
-            OnProcessExit(target_action=spawn_broadcaster, on_exit=[spawn_arm])
-        ),
+        # gz_ros2_control 的插件要等机器人被生成之后才会建 controller_manager，所以推迟一点；
+        # 两个 spawner 各自独立起、各自等（--controller-manager-timeout），**不串成链** ——
+        # 串的话前一个失败也会照样起后一个，留下"看着活着、实则半配置"的栈（实测踩过）。
+        TimerAction(period=12.0, actions=[spawn_broadcaster, spawn_arm]),
     ])

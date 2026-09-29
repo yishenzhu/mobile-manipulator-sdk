@@ -1,13 +1,20 @@
 """真 move_group：把 URDF + SRDF + kinematics + 控制器喂给它。
 
     ros2 launch robot_description move_group.launch.py
+    ros2 launch robot_description move_group.launch.py use_sim_time:=true   # 配 Gazebo 时
 
 ⚠️ 这一条不含控制器本体 —— 要真执行得**先起执行侧**，再起这个：
        ros2 launch robot_description ros2_control.launch.py
 ⚠️ `config/joint_limits.yaml` 和 `pilz_cartesian_limits.yaml` 必须存在，缺了 launch 直接失败。
+⚠️ 配 Gazebo（robot_sdk_gazebo）时必须 `use_sim_time:=true` —— 仿真时钟从 0 起、与墙钟
+   差着 1.7e9 秒，混用会让 TF 查询和轨迹时间全错。
 """
 
 from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration
+from launch_ros.actions import SetParameter
+from launch_ros.parameter_descriptions import ParameterValue
 from moveit_configs_utils import MoveItConfigsBuilder
 from moveit_configs_utils.launches import (
     generate_move_group_launch,
@@ -31,6 +38,19 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
+        DeclareLaunchArgument("use_sim_time", default_value="false",
+                              description="配 Gazebo 时设 true。"),
+        # MoveIt 执行前会拿轨迹起点和"当前状态"比对，差超过这个值就拒执行（报 CONTROL_FAILED）。
+        # 默认 0.01 是给真机的；仿真的跟踪误差本来就大，配 Gazebo 时放宽到 ~0.1。
+        DeclareLaunchArgument("allowed_start_tolerance", default_value="0.01",
+                              description="轨迹起点与当前状态的最大允许偏差（弧度/米）。"),
+        # 同作用域里的节点都会拿到它们 —— rsp / move_group / 静态 TF 广播器都需要。
+        SetParameter(name="use_sim_time",
+                     value=ParameterValue(LaunchConfiguration("use_sim_time"),
+                                          value_type=bool)),
+        SetParameter(name="trajectory_execution.allowed_start_tolerance",
+                     value=ParameterValue(LaunchConfiguration("allowed_start_tolerance"),
+                                          value_type=float)),
         generate_rsp_launch(moveit_config),
         generate_static_virtual_joint_tfs_launch(moveit_config),
         generate_move_group_launch(moveit_config),

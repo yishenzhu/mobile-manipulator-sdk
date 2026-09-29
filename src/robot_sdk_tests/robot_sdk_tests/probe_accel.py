@@ -59,6 +59,13 @@ class Measure(Node):
 
     def measure(self, target, accel):
         """跑一次，返回运动时长；量不到就抛。"""
+        # ⚠️ 先等订阅**真的**收到样本：否则 /joint_states 的发现还没完成，
+        #    整个窗口一条都没有，会被误报成"没量到运动"（实测踩过一次）。
+        deadline = time.monotonic() + 10.0
+        while not self.samples and time.monotonic() < deadline:
+            rclpy.spin_once(self, timeout_sec=0.1)
+        assert self.samples, "10 秒内一条 /joint_states 都没收到 —— 订阅或发现有问题"
+
         time.sleep(0.3)                       # 让数据流先稳
         before = len(self.samples)
         self.move(target, accel)
