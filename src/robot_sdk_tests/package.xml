@@ -37,6 +37,20 @@
        少了这一条 conftest 一导入就 PackageNotFoundError（实测踩过）。 -->
   <test_depend>robot_description</test_depend>
 
+  <!-- 真栈那条路（test_real_stack.py）要的：fixture 会起 ros2_control 和 move_group。
+       ⚠️ 同样必须逐条声明 —— 少一条，colcon test 的环境里就少一个包。 -->
+  <test_depend>ros2_control</test_depend>
+  <test_depend>controller_manager</test_depend>
+  <!-- fixture 的就绪判据要问控制器状态（问真状态，不是看话题在不在发）。 -->
+  <test_depend>controller_manager_msgs</test_depend>
+  <test_depend>joint_state_broadcaster</test_depend>
+  <test_depend>joint_trajectory_controller</test_depend>
+  <!-- move_group.launch.py 会 import 它。 -->
+  <test_depend>moveit_configs_utils</test_depend>
+  <test_depend>moveit_ros_move_group</test_depend>
+  <!-- 真栈那条探针要查 TF（结果里的最终误差就是从那上面量的）。 -->
+  <test_depend>tf2_ros</test_depend>
+
   <!-- 探针的本体是 check()（不符合预期就 assert），test/ 里把它们当 pytest 跑。
        起不来 = error，判据不对 = failure —— colcon test-result 里天生分开。 -->
   <test_depend>python3-pytest</test_depend>

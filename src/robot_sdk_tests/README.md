@@ -1,7 +1,7 @@
 # robot_sdk_tests
 
-跨包的**验收探针**：验的是**行为**（忙时拒收、取消、折角、避障预检、加速度生效），
-不是单个函数 —— 那些在 `robot_sdk_core` 的单元测试里。
+跨包的**验收探针**：验的是**行为**（忙时拒收、取消、折角、避障预检、加速度生效、
+真栈能否解出带姿态的目标），不是单个函数 —— 那些在 `robot_sdk_core` 的单元测试里。
 
 放在仓库里的意义是**可复核**：谁都能跑一遍，不用再靠临时写一段。
 
@@ -67,7 +67,7 @@ pytest src/robot_sdk_tests/test/test_probes.py -s -k motion
 
 ```bash
 $ colcon test && colcon test-result
-Summary: 69 tests, 0 errors, 0 failures, 0 skipped        # 65 个单元测试 + 4 个探针
+Summary: 82 tests, 0 errors, 0 failures, 0 skipped        # 74 个单元测试 + 8 个探针
 ```
 
 **为什么走 pytest**：`errors` 和 `failures` **天生分开** —— "环境没起好"和"行为不对"
@@ -77,6 +77,7 @@ Summary: 69 tests, 0 errors, 0 failures, 0 skipped        # 65 个单元测试 +
 |---|---|---|
 | `test/test_probes.py` | mock 机器人 | 4 |
 | `test/test_adapter.py` | 假下游 + 适配器 | 3 |
+| `test/test_real_stack.py` | 真 ros2_control + 真 move_group | 1 |
 | `test/test_navigation.py` | Nav2 整栈 | 1 |
 
 | 探针 | 验什么 |
@@ -86,6 +87,7 @@ Summary: 69 tests, 0 errors, 0 failures, 0 skipped        # 65 个单元测试 +
 | `probe_avoid` | `avoid_obstacles` 的两种取值 |
 | `probe_accel` | `max_acceleration` 真的生效 |
 | `probe_navigate` | 到得了 + 真的走了 + 取消得掉 |
+| `probe_pose_real` | 真栈能解出**带姿态**的目标（6 DOF 的证据） |
 
 ## 适配器那条路
 
@@ -98,6 +100,42 @@ pytest src/robot_sdk_tests/test/test_adapter.py -s
 ```
 
 `probe_avoid` 不在这组 —— 适配器只管关节运动，导航链路不在 `motion_chain` 里。
+
+## 真栈那条路（真 ros2_control + 真 move_group）
+
+`test_real_stack.py` 打的是三个进程：`ros2_control.launch.py` + `move_group.launch.py`
++ `moveit_adapter`。它验的是**集成**。
+
+```bash
+pytest src/robot_sdk_tests/test/test_real_stack.py -s
+```
+
+**它验什么**：拿 `/compute_fk` 算出的、**姿态非平凡**的可达位姿当目标（seed 里三个腕关节
+都非零），用 `any_orientation=False`（适配器会**真填**姿态约束）发下去，断言 `success`
+且姿态误差在容忍带内。⇒ 这实际是在钉「`arm` 组有 6 个 revolute 关节、KDL 解得出完整
+6 维位姿」。**只有 4 个关节时这条必失败**（回 `GOAL_STATE_INVALID` -27），
+当时只能靠 `position_only_ik` 放弃姿态。
+
+**和替身那条的分工**（两条都要有）：
+
+| | `test_pose.py`（替身） | `test_real_stack.py`（真栈） |
+|---|---|---|
+| 验的是 | **我们翻得对不对** | **它认不认** |
+| 快慢 | 单进程，秒级 | 三进程 + 规划，约 30 秒 |
+| 能不能看收到的约束 | ✅ 替身会回显 | ❌ 只看错误码 |
+
+假连杆名那次就是真栈抓出来的（替身不回显、也不读 URDF，抓不出）。
+
+**就绪判据问的是真状态**，不是"服务在不在"：
+
+1. `/controller_manager/list_controllers` 里 `arm_controller` 与 `joint_state_broadcaster`
+   都到 `active` —— 光有广播器也能发 `/joint_states`，所以**不能拿话题当信号**；
+2. `/sdk/move_to_pose` 动作服务端在；
+3. TF 上查得到 `base_footprint → gripper_base_link` —— 结果里的最终误差就是从它量出来的，
+   查不到会留成 0，测试就变成假绿（适配器那边会改成报一句话）。
+
+**缺包时明确跳过**：`real_stack` 开头逐个查 `REAL_STACK_PACKAGES`，缺了就 `pytest.skip`
+并列出缺哪些。不静默跳过 —— 静默跳过会让"没装 ros2_control 的机器"看起来跟"跑过了"一样绿。
 
 ## 导航那条路（Nav2 整栈）
 
@@ -129,7 +167,7 @@ pytest src/robot_sdk_tests/test/test_navigation.py -s
 
 ### 几条路**互斥**（靠 scope 保证）
 
-三个 fixture 都是 **`module` 级** —— 每个文件各起一份，**拆干净了才走下一个文件**，
+四个 fixture 都是 **`module` 级** —— 每个文件各起一份，**拆干净了才走下一个文件**，
 所以它们在时间上不重叠。
 
 **别改成 `session` 级**：那样几个会同时活到会话末尾，而**同名 action 服务端不止一个**
