@@ -8,20 +8,13 @@
 
 namespace robot_sdk {
 
-/// 把命名空间规范化为 ROS 2 要求的规范形式：
-///   - 非空则保证带前导 '/'   （"robot1"    → "/robot1"）
-///   - 去掉全部尾部 '/'        （"/robot1/"  → "/robot1"）
-///   - 只由 '/' 组成的输入归一成空串（表示根命名空间）
-///
-/// ROS 2 的规则是「namespace must not end with a '/', unless only a '/'」，
-/// 违反它的输入会让 rclcpp::Node 构造直接抛 InvalidNamespaceException。
-/// 配置由人手写，所以必须在这里兜住。
+/// 把命名空间规范化为 ROS 2 要求的形式：非空则补前导 '/'、去掉全部尾部 '/'、
+/// 只由 '/' 组成的输入归一成空串。违反规则会让 rclcpp::Node 构造抛
+/// InvalidNamespaceException —— 配置由人手写，所以必须在这里兜住。
 std::string normalizeNamespace(const std::string& ns);
 
-/// 每个字段都有合理默认值，客户可以从 `RobotConfig{}` 开始，
-/// 只覆盖本次部署真正不同的那几项。
-/// 配置之后也可以从 ROS 参数读入（见 RobotConfig::fromNode），
-/// 这样就能被 launch 文件覆盖而不用改代码。
+/// 每个字段都有合理默认值，客户可以从 `RobotConfig{}` 开始，只覆盖本次部署不同的那几项。
+/// 也能从 ROS 参数读入（见 RobotConfig::fromNode），从而被 launch 覆盖而不用改代码。
 
 struct NavigationConfig {
   /// 后端 action 名（相对名，由 rcl 按节点命名空间展开）。
@@ -56,10 +49,9 @@ struct MotionConfig {
   /// 夹爪动作的超时。夹爪行程短、动作快，所以**独立于 default_timeout_s** ——
   /// 用通用的 30 秒去等一个夹爪动作，卡住时要干等半分钟。
   double gripper_timeout_s{5.0};
-  // ⚠️ 这里**没有**"连续关节 / 速度上限 / 关节限位" —— 它们不是配置，是**机器人的属性**：
-  //    能转到哪、转多快、能不能一直转，都写在它的 URDF 里，由**执行侧**（机器人自己）
-  //    读出来并用上。SDK 只发意图（去哪、多快），不替机器人判断"能不能"。
-  //    所以也别在这里加回来 —— 两处各存一份迟早会漂移。
+  // ⚠️ 这里**没有**"连续关节 / 速度上限 / 关节限位" —— 它们是**机器人的属性**，写在 URDF 里、
+  //    由执行侧读出来用。SDK 只发意图（去哪、多快），不替机器人判断"能不能"。
+  //    别加回来：两处各存一份迟早漂移。
 };
 
 struct PerceptionConfig {

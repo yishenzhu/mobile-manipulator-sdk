@@ -1,13 +1,8 @@
 #pragma once
 
 /// Umbrella header：一次拉进 Robot SDK 的全部公开 C++ API。
-///
 ///     #include <robot_sdk/robot_sdk.hpp>
-///     using namespace robot_sdk;
-///
-/// 它**不包含** `detail/` 下的内部件（`runtime` / `scan_utils` /
-/// `action_util` / `latest_value_cache`）—— 那些不是给客户用的。
-/// 比如要算"最近障碍距离"，请走 `perception().nearestObstacleDistance()`。
+/// 不含 `detail/` 下的内部件（要算最近障碍距离请走 nearestObstacleDistance()）。
 
 #include "robot_sdk/action_handle.hpp"
 #include "robot_sdk/config.hpp"

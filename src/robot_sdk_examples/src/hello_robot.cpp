@@ -1,11 +1,6 @@
-// Robot SDK 的最小示例：连上机器人，读状态和传感器。
-//
-//   # 终端 1：启动 mock 机器人
-//   ros2 run robot_sdk_sim mock_robot_node
-//   # 终端 2：跑本示例
-//   ros2 run robot_sdk_examples hello_robot
-//
-// 全程不需要 Gazebo 或真机 —— 换成真机时，**这个文件一行都不用改**。
+// Robot SDK 的最小示例：连上机器人，读状态和传感器。全程不需要 Gazebo 或真机，
+// 换成真机时这个文件一行都不用改。
+//   ros2 run robot_sdk_sim mock_robot_node   然后  ros2 run robot_sdk_examples hello_robot
 #include <chrono>
 #include <cstdio>
 #include <thread>
@@ -19,13 +14,9 @@ using namespace std::chrono_literals;
 int main(int argc, char **argv) {
   rclcpp::init(argc, argv);
 
-  // 一个 Robot = 四个能力 API（导航/运动/感知/状态）+ 它们需要的 ROS 2 管道。
-  //
-  // 执行器仍然是 **ROS 2 的**：SDK 内部自建了一个 MultiThreadedExecutor
-  // （见 robot_sdk_core/src/runtime.cpp），`robot.spin()` 转的就是它。
-  // 这个 std::thread 不是为了替代执行器 —— 只是因为 `spin()` 会**阻塞**，
-  // 而主线程后面还要继续调阻塞式 API（waitForXxx / goTo / wait）。
-  // （寄生模式 `Robot(node, config)` 下由客户自己 spin，连这个线程都不用。）
+  // 一个 Robot = 四个能力 API + 它们需要的 ROS 2 管道。执行器仍是 **ROS 2 的**：
+  // SDK 内部自建 MultiThreadedExecutor，`robot.spin()` 转的就是它。这个 std::thread
+  // 不是替代执行器 —— 只因 spin() 会阻塞，而主线程还要继续调阻塞式 API。
   robot_sdk::RobotConfig config{"hello_robot"};
   robot_sdk::Robot robot(config);
   std::thread spinner([&robot]() { robot.spin(); });

@@ -2,13 +2,9 @@
 
 #include <string>
 
-// 注意：rclcpp_action::ResultCode 定义在 client_goal_handle.hpp，
-// **不在** types.hpp 里（types.hpp 只有 GoalUUID / GoalStatus / GoalInfo）。
-//
-// 写错这个 include 的后果很隐蔽：头文件不再自包含，只有当别的头文件
-// 恰好先引入了 client_goal_handle.hpp 时才能编译过。一旦有人第一个
-// include 本文件，就会看到 "'ResultCode' is not a member of 'rclcpp_action'"
-// 这种莫名其妙的报错。
+// ⚠️ ResultCode 定义在 client_goal_handle.hpp，**不在** types.hpp 里。
+// 写错的后果很隐蔽：头文件不再自包含，只有别人恰好先引入它时才编译得过，
+// 第一个 include 本文件的人会看到 "'ResultCode' is not a member of" 这种怪报错。
 #include <rclcpp_action/client_goal_handle.hpp>
 
 namespace robot_sdk {

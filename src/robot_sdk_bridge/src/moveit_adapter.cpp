@@ -1,8 +1,6 @@
 // 把 SDK 的笛卡尔动作翻译成 MoveIt 的 MoveGroup。
-//
-// 这是"**意图 → 规划约束**"的那一层：客户给的是一个**位姿**，而规划器要的是**一组约束**。
-// 逆解、碰撞检查、规划全是 MoveIt 的事 —— 本节点只翻译和转发，不自己算。
-// 和 motion_adapter 一样，没有本地状态要推进，所以不需要定时器。
+// 这是"**意图 → 规划约束**"那一层：客户给一个位姿，规划器要一组约束。逆解、碰撞检查、
+// 规划全是 MoveIt 的事 —— 本节点只翻译和转发，没有本地状态要推进，不需要定时器。
 #include <algorithm>
 #include <cmath>
 #include <memory>
@@ -148,12 +146,9 @@ class MoveItAdapter : public rclcpp::Node {
 
   // ── 翻译：位姿 → 约束 ──
 
-  /// 一个 `PoseStamped` 拆成两组约束。位置那组给的是一个**区域**（半径 = 容差的球），
-  /// 姿态那组给的是"这个朝向 ± 容差" —— 这正是 MoveIt 要的形状。
-  ///
-  /// `any_orientation` 为真时**不填**姿态约束：MoveIt 的语义就是"那一项空着 = 不管它"，
-  /// 于是规划器可以在可行解里自己挑朝向。（**不是**填个单位四元数 ——
-  /// 那意思是"朝基准方向"，是个真约束。）
+  /// 一个 PoseStamped 拆成两组约束：位置是**区域**（半径 = 容差的球），姿态是"朝向 ± 容差"。
+  /// ⚠️ `any_orientation` 为真时**不填**姿态约束（MoveIt 语义：那一项空着 = 不管它）——
+  ///    别填单位四元数，那意思是"朝基准方向"，是个真约束。
   moveit_msgs::msg::Constraints toConstraints(const geometry_msgs::msg::PoseStamped& target,
                                               bool any_orientation) const {
     moveit_msgs::msg::Constraints out;
@@ -199,13 +194,9 @@ class MoveItAdapter : public rclcpp::Node {
     request.num_planning_attempts = planning_attempts_;
     request.allowed_planning_time = planning_time_s_;
 
-    // 客户的 max_velocity 是**速度**（m/s）。MoveIt 这两个速度字段里只有一个对得上：
-    //   - `max_velocity_scaling_factor` 是**比例**（乘在 robot model 的上限上），
-    //     硬套会把 "0.5 m/s" 当成"半速" —— 数值碰巧一样、意思完全不同；
-    //   - **`max_cartesian_speed` 就是 m/s**，而且 `<= 0` 的语义正是"不修改轨迹"，
-    //     和 SDK 这边"0 = 不指定"**一模一样**。
-    // 所以速度走后者。⚠️ 它要配合 `default_planning_request_adapters/LimitMaxCartesianLinkSpeed`
-    // 才生效 —— 没配的话 MoveIt 会**静默忽略**（它自己的注释里写明了）。
+    // 客户的 max_velocity 是**速度**（m/s）⇒ 走 `max_cartesian_speed`（单位就是 m/s，
+    // `<= 0` = 不修改轨迹，与 SDK 的"0 = 不指定"一致）。不能用 `max_velocity_scaling_factor`
+    // ——那是**比例**，硬套会把 0.5 m/s 当成"半速"。⚠️ 要配 LimitMaxCartesianLinkSpeed 才生效。
     if (sdk.max_velocity > 0.0F) {
       request.cartesian_speed_limited_link = end_effector_link_;
       request.max_cartesian_speed = sdk.max_velocity;

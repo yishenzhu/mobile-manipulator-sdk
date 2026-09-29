@@ -15,12 +15,9 @@
 
 namespace robot_sdk {
 
-/// tf2 的薄封装，但把错误模型换掉了。
-///
-/// 客户永远不该被迫去 catch tf2 的异常，也不该操心 buffer 的时序：
-/// 每个方法都返回 Result，并且最多等待 `timeout` 让变换变得可用。
-///
-/// `spin_thread` 为什么取 false（含一个实测到的析构陷阱）见 `学习笔记.md` 附录 C。
+/// tf2 的薄封装，但换掉了错误模型：客户不必 catch tf2 异常，也不必操心 buffer 时序。
+/// 每个方法都返回 Result，并且最多等 `timeout` 让变换变得可用。
+/// `spin_thread` 取 false 的原因（一个实测到的析构陷阱）见 学习笔记.md 附录 C。
 class TransformManager {
  public:
   using Duration = std::chrono::duration<double>;

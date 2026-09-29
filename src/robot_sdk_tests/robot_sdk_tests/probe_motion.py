@@ -48,10 +48,9 @@ def check(action_name="/sdk/move_to_joint_positions"):
         assert probe.client.wait_for_server(timeout_sec=10.0), \
             f"等不到动作服务端 {action_name}"
 
-        # ── ① 忙时拒收 ──
-        # 目标要**慢**（这样第二个目标发来时它还在跑），所以走一段长的**手臂**动作。
-        # ⚠️ 夹爪只能给 0～0.03（URDF 说它是 prismatic）—— 给它 3.0 会被机器人当场拒，
-        #    那是**对的**：限位归执行侧管。
+        # ── ① 忙时拒收 ── 目标要**慢**（第二个目标发来时它还在跑），所以走一段长的手臂动作。
+        # ⚠️ 夹爪只能给 0～0.03（URDF 说它是 prismatic）；给它 3.0 会被当场拒 ——
+        #    那是对的，限位归执行侧管。
         print("① 发一个慢目标（shoulder_lift 走 1.5 rad）...")
         first = probe.wait(probe.client.send_goal_async(
             probe.goal([0.5, 1.5, 0.2, 0.0, 0.0, 0.0, 0.01], velocity=0.5, acceleration=1.0)))

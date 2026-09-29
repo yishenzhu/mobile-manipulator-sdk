@@ -1,11 +1,6 @@
-// 把 SDK 的导航动作翻译成 Nav2 的导航动作。
-//
-//   SDK 客户端 ──robot_sdk_interfaces/NavigateToPose（sdk/navigate_to_pose）──▶ 本节点
-//                                                                              │
-//              ──nav2_msgs/NavigateToPose（navigate_to_pose）────────────────▶ Nav2
-//
-// 它是"桥接器"：没有本地状态要推进，只做翻译和转发 —— 所以**不需要定时器**
-// （也就用不上 tickAction），终态也由下游（Nav2）决定，本节点不自己判。
+// 把 SDK 的导航动作翻译成 Nav2 的导航动作：
+//   sdk/navigate_to_pose（robot_sdk_interfaces）──▶ 本节点 ──▶ navigate_to_pose（nav2_msgs）──▶ Nav2
+// 桥接器没有本地状态要推进，所以不需要定时器；终态也由下游决定，本节点不自己判。
 #include <chrono>
 #include <limits>
 #include <memory>

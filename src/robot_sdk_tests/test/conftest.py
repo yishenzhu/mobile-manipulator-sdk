@@ -143,16 +143,9 @@ def navigation():
             assert client.wait_for_server(timeout_sec=60.0), \
                 f"等不到 {ADAPTER_NAVIGATION}（日志：{log.name}）"
 
-            # ⚠️ 判据必须问**生命周期**，不能只看代价地图有没有帧。
-            #    两个坑都踩过了：
-            #    ① VOLATILE 订 latch 话题 → 一帧都收不到 → 报"等不到 costmap"（假红）；
-            #    ② 改成 TRANSIENT_LOCAL → **立刻**拿到那帧 → 提前放行，而 bt_navigator
-            #       这时还在 activating → 探针的目标撞上未激活的动作服务端
-            #       （实测："Action server is inactive. Rejecting the goal."）
-            #       → 整栈 abort → 之后什么都失败。
-            #    只有"bt_navigator 到 active"才真的等于"能干活" —— costmap 的帧是 latch 的，
-            #    它早于全栈就绪就已经存在了，所以它天然不能当这个信号。
-            # 真正的判据：bt_navigator 生命周期到 active。
+            # ⚠️ 判据必须问**生命周期**，不能看代价地图有没有帧：那帧是 latch 的，早于全栈
+            # 就绪就存在 ⇒ 用它会让探针提前放行，撞上还在 activating 的 bt_navigator
+            # （"Action server is inactive"）⇒ 整栈 abort。判据就是 bt_navigator 到 active。
             state_client = node.create_client(GetState, "/bt_navigator/get_state")
             assert state_client.wait_for_service(timeout_sec=60.0), \
                 f"等不到 /bt_navigator/get_state（日志：{log.name}）"

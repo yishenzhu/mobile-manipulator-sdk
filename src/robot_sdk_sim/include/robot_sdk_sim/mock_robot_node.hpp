@@ -32,13 +32,9 @@
 
 namespace robot_sdk::sim {
 
-/// 自包含的模拟移动操作机器人。
-///
-/// 它只讲 **SDK 的契约**：实现 SDK 的动作服务端、发布 SDK 会订阅的
-/// 话题、广播 TF。因此示例、集成测试和新手上手都**不需要 Gazebo 或真机**。
-///
-/// 命名空间由**节点自身**决定（见 launch 文件），而不是某个参数 ——
-/// 话题名一律用相对名，交给 rcl 按节点命名空间展开。
+/// 自包含的模拟移动操作机器人：只讲 **SDK 的契约**（实现 SDK 的动作服务端、
+/// 发布 SDK 会订阅的话题、广播 TF），所以示例和集成测试都不需要 Gazebo 或真机。
+/// 命名空间由**节点自身**决定，话题名一律用相对名交给 rcl 展开。
 class MockRobotNode : public rclcpp::Node {
  public:
   explicit MockRobotNode(const rclcpp::NodeOptions& options = rclcpp::NodeOptions());
@@ -94,11 +90,9 @@ class MockRobotNode : public rclcpp::Node {
   /// 只负责节奏和发布；每一路的数据在下面的 `makeXxx` 里组装。
   void publishSensors(const rclcpp::Time& stamp);
 
-  /// 组装各路传感器数据 —— 与 `makeStatus` / `makeNavFeedback` 同一模式：
-  /// 在**锁内**被调用，`lock` 是**凭证**（参数不命名 = 一眼看出它不是数据）。
-  ///
-  /// `previous_yaw` 由调用方传进来（它读的是同一个 `pose_`），
-  /// 这样 `makeImu` 仍然是 `const` —— 它不必去改 `last_yaw_`。
+  /// 组装各路传感器数据 —— 与 makeStatus 同一模式：在**锁内**被调用，lock 是**凭证**
+  /// （参数不命名 = 一眼看出它不是数据）。`previous_yaw` 由调用方传进来（它读同一个
+  /// `pose_`），这样 `makeImu` 仍是 const。
   sensor_msgs::msg::LaserScan makeScan(std::lock_guard<std::mutex>& lock,
                                        const rclcpp::Time& stamp) const;
   sensor_msgs::msg::Imu makeImu(std::lock_guard<std::mutex>& lock,
@@ -112,18 +106,9 @@ class MockRobotNode : public rclcpp::Node {
   /// 它只吃已经算好的深度图、不读任何共享状态 —— 所以不需要凭证，也不收 lock。
   sensor_msgs::msg::PointCloud2 makePointCloud(const sensor_msgs::msg::Image& depth) const;
 
-  /// 把"此刻的状态"拼成一条 RobotStatus。
-  ///
-  /// **状态话题与服务查询共用它** —— 否则同一个事实存两份，
-  /// 迟早出现"话题说 A、服务说 B"这种极难查的不一致
-  /// （本类一开始就踩过：服务那份漏了 error_code 与 is_estop_engaged）。
-  ///
-  /// 参数 `lock` 是**凭证**：想调用它，必须先持有 `mutex_`。
-  ///
-  /// **为什么用凭证，而不是让它自己加锁**：自己加锁会让"在已持锁的地方顺手调用"
-  /// 变成**自死锁**（`std::mutex` 检测不到自锁，是 UB 不是异常，直接挂住）——
-  /// 而那种误用太容易发生。伪造一把锁则必须**刻意**构造别的 mutex 的 `lock_guard`，
-  /// 现实中不会发生。判据是**触发难度**，不是理论严密性。详见笔记 §7.7。
+  /// 把"此刻的状态"拼成一条 RobotStatus。**状态话题与服务查询共用它** —— 否则同一事实
+  /// 存两份，迟早"话题说 A、服务说 B"。参数 lock 是**凭证**（必须先持 mutex_）：用凭证
+  /// 而非自己加锁，是为了让"已持锁时顺手调用"变成不可能（详见笔记 §7.7）。
   RobotStatus makeStatus(std::lock_guard<std::mutex>& lock) const;
 
   /// 按名字找一个关节；没有就新建一个，返回其下标。
@@ -203,8 +188,7 @@ class MockRobotNode : public rclcpp::Node {
   double uptime_s_{0.0};
 
   // ── 底盘命令（同样受 mutex_ 保护）──
-  /// 最近一次 cmd_vel 的线速度 / 角速度，以及它是什么时候收到的。
-  /// 收不到新命令超过一段时间就当停车 —— 真底盘也是这个行为。
+  /// 最近一次 cmd_vel 的线/角速度及其收到时刻；超时没新命令就当停车（真底盘也这样）。
   /// 时间用**单调时钟**：只问"距上次过了多久"，与系统时间/仿真时间无关。
   double cmd_linear_{0.0};
   double cmd_angular_{0.0};

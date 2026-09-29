@@ -13,11 +13,9 @@ using namespace std::chrono_literals;
 
 namespace {
 
-/// 只做 "include 整个公开 API" 的编译期检查 —— 这条顺带充当
-/// umbrella header 的自包含性测试（谁漏了 include，这里会编译失败）。
-///
-/// 注意套件名必须和下面的 fixture 区分开：gtest **不允许**在同一套件里
-/// 混用 TEST 和 TEST_F。
+/// 只做 "include 整个公开 API" 的编译期检查 —— 顺带充当 umbrella header 的
+/// 自包含性测试（谁漏了 include，这里会编译失败）。
+/// ⚠️ 套件名必须和下面的 fixture 区分开：gtest 不允许同一套件里混用 TEST 和 TEST_F。
 TEST(UmbrellaHeaderTest, IsSelfContained) { SUCCEED(); }
 
 class RobotTest : public ::testing::Test {

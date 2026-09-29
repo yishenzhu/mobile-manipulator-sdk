@@ -1,12 +1,6 @@
 // 导航示例：先"边跑边看反馈"，再用一次阻塞调用回来。
-//
-//   # 终端 1
-//   ros2 run robot_sdk_sim mock_robot_node
-//   # 终端 2
-//   ros2 run robot_sdk_examples demo_navigation
-//
-// 接上 Nav2 适配器时，动作名要换（见下面的说明）：
-//   ros2 run robot_sdk_examples demo_navigation sdk/navigate_to_pose
+//   ros2 run robot_sdk_sim mock_robot_node                # 终端 1
+//   ros2 run robot_sdk_examples demo_navigation [动作名]   # 终端 2（接 Nav2 适配器时传 sdk/navigate_to_pose）
 #include <chrono>
 #include <cstdio>
 #include <string>
@@ -23,11 +17,9 @@ int main(int argc, char** argv) {
 
   robot_sdk::RobotConfig config{"demo_navigation"};
 
-  // 动作名可配：mock 机器人提供的名字是 `navigate_to_pose`；
-  // 接上 Nav2 适配器时必须换成 `sdk/navigate_to_pose` ——
-  // 因为 Nav2 自己已经占了 `navigate_to_pose` 这个名字，
-  // 而**同名但类型不同**的两个 action server 无法共存。
-  // 示例不改代码就能打这两处，靠的就是这个参数。
+  // 动作名可配：mock 提供的是 `navigate_to_pose`，接 Nav2 适配器时要换成
+  // `sdk/navigate_to_pose` —— Nav2 自己占了前者，而**同名但类型不同**的两个 action
+  // server 无法共存。不用改代码就能打这两处，靠的就是这个参数。
   if (argc > 1) {
     config.navigation.action_name = argv[1];
   }

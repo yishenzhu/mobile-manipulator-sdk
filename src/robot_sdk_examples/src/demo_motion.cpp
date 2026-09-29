@@ -1,12 +1,6 @@
-// 关节运动示例：走一遍 SDK 运动 API 的两种用法（边走边看反馈 / 一次阻塞调用）。
-//
-//   # 终端 1
-//   ros2 run robot_sdk_sim mock_robot_node
-//   # 终端 2
-//   ros2 run robot_sdk_examples demo_motion
-//
-// 接上运动适配器时，动作名要换（同 demo_navigation）：
-//   ros2 run robot_sdk_examples demo_motion sdk/move_to_joint_positions
+// 关节运动示例：SDK 运动 API 的两种用法（边走边看反馈 / 一次阻塞调用）。
+//   ros2 run robot_sdk_sim mock_robot_node            # 终端 1
+//   ros2 run robot_sdk_examples demo_motion [动作名]   # 终端 2（接适配器时传 sdk/move_to_joint_positions）
 #include <chrono>
 #include <cstdio>
 #include <string>

@@ -18,10 +18,8 @@
 
 namespace robot_sdk {
 
-/// 机器人的健康、电源与故障上报。
-///
-/// 状态**既以流的形式推送、也能按需查询**，所以这里两种都提供：
-/// 一份缓存的快照，以及一次请求/响应的调用。
+/// 机器人的健康、电源与故障上报。状态既以流的形式推送、也能按需查询，
+/// 所以两种都提供：一份缓存的快照，以及一次请求/响应的调用。
 class StatusAPI {
  public:
   using RobotStatus = robot_sdk_interfaces::msg::RobotStatus;
@@ -52,10 +50,8 @@ class StatusAPI {
   Result<RobotStatusPtr> waitForStatus(std::chrono::duration<double> timeout);
 
   /// 通过 SDK 的服务接口做一次请求/响应式的状态查询。
-  ///
-  /// 这里返回**按值**的 RobotStatus（而快照返回 ConstSharedPtr）——
-  /// 因为服务给的是一份**新值**、不是缓存快照，按值返回没有可省的拷贝；
-  /// 硬套指针反而要额外分配一次，更慢又更绕。
+  /// 这里返回**按值**的 RobotStatus（快照才返回 ConstSharedPtr）：服务给的是新值、
+  /// 不是缓存，按值返回没有可省的拷贝，硬套指针反而要多分配一次。
   Result<RobotStatus> queryStatus(std::chrono::duration<double> timeout);
 
   /// 注册一个"每次状态更新都调用"的回调。

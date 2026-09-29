@@ -9,9 +9,8 @@
 namespace robot_sdk {
 
 /// 线程安全的"最新样本"容器，用于流式 topic。
-///
-/// 传感器 topic 的发布速率远高于客户代码的消费速率，所以 SDK 暴露
-/// "最新值"语义，而不是让客户去消化一堆过期消息。
+/// 传感器发布速率远高于消费速率，所以 SDK 给"最新值"语义，
+/// 而不是让客户去消化一堆过期消息。
 template <typename T> class LatestValueCache {
 public:
   void update(const T &value) {

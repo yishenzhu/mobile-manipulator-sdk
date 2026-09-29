@@ -8,12 +8,9 @@
 
 namespace robot_sdk {
 
-/// 一个动作服务端的**槽位**：把一个目标的生命周期收成**一个值**。
+/// 一个动作服务端的槽位：把一个目标的生命周期收成**一个值**。
+/// 不用三个 bool —— 8 种组合里只有 4 种合法，而三态枚举让非法组合无法表达。
 /// 同时只服务一个同类目标的服务端，每个动作一个槽位。
-///
-/// **为什么不是三个 bool**（`reserved` / `active` / `cancel_requested`）：
-/// 三个 bool 有 8 种组合，只有 4 种合法 —— 而 `reserved && active` 正是
-/// 非法组合之一。改成三态枚举后，非法组合**根本无法表达**。
 template <typename Action>
 struct ActionSlot {
   enum class Phase {

@@ -70,14 +70,9 @@ constexpr double kCameraHfovRad = M_PI / 3.0; // 水平视场 60°
 constexpr double kCameraOffsetX = 0.2;
 constexpr double kCameraOffsetZ = 0.3;
 
-/// 从 (ox,oy,oz) 沿**单位**方向 (dx,dy,dz) 射出，打在长方体房间上的距离。
-/// 打不到返回 inf。
-///
-/// 这是标准的 **slab 法**：把长方体看成三对平行板，每对给出一个参数区间
-/// `[t1, t2]`，三者求交 —— 交出来的下界就是"进入盒子"的距离。
-///
-/// **激光和相机共用它。** 激光的 dz ≡ 0，所以地面/天花板那两项永远命中不了，
-/// 结果和"只看四面墙"完全一样；但共用一份房间模型意味着**不会改了一个忘另一个**。
+/// 从 (ox,oy,oz) 沿**单位**方向射出，打在长方体房间上的距离；打不到返回 inf。
+/// 标准 slab 法：三对平行板各给一个参数区间，求交。**激光和相机共用它** ——
+/// 激光的 dz ≡ 0 等价于只看四面墙，共用一份房间模型就不会改了一个忘另一个。
 double rayToBox(double ox, double oy, double oz, double dx, double dy, double dz) {
   const double origin[3] = {ox, oy, oz};
   const double dir[3] = {dx, dy, dz};
@@ -108,10 +103,9 @@ double rayToBox(double ox, double oy, double oz, double dx, double dy, double dz
   if (t_enter > t_exit || t_exit < 0.0) {
     return std::numeric_limits<double>::infinity();
   }
-  // ⚠️ 这里是关键：**相机在房间内部**，所以 t_enter 是负的（"入口在身后"），
-  //    真正的墙是**出口** t_exit。
-  //    一开始把 t_enter 初始成 0 是错的 —— max(0, 负数) 会把负号吃掉，
-  //    于是永远返回 0（一整张深度图全是 0，而且不报错）。
+  // ⚠️ 关键：**相机在房间内部**，所以 t_enter 是负的，真正的墙是**出口** t_exit。
+  //    把 t_enter 初始成 0 是错的 —— max(0, 负数) 会吃掉负号，于是永远返回 0
+  //    （一整张深度图全是 0，而且不报错）。
   return t_enter > 0.0 ? t_enter : t_exit;
 }
 
@@ -122,9 +116,7 @@ double cameraFocalLength() {
 }
 
 /// 读深度图的第 `index` 个像素（encoding = "32FC1"，每像素一个 float）。
-///
-/// 用 `memcpy` 而不是把 `data` 强转成 `float*`：后者依赖"vector<uint8_t> 的缓冲区
-/// 满足 float 对齐"这个实践中成立、标准里不保证的假设。
+/// 用 memcpy 而不是把 data 强转成 float*：后者依赖"缓冲区满足 float 对齐"这个标准里不保证的假设。
 float readDepthPixel(const sensor_msgs::msg::Image &image, std::size_t index) {
   float value = 0.0F;
   std::memcpy(&value, image.data.data() + index * sizeof(float), sizeof(float));
@@ -228,10 +220,9 @@ MockRobotNode::MockRobotNode(const rclcpp::NodeOptions &options)
   static_tf_broadcaster_->sendTransform(
       makeTransform(stamp, base, camera_frame_, 0.2, 0.0, 0.3, 0.0));
 
-  // 相机的**光学帧**：ROS 约定图像数据的坐标系是 z 朝前 / x 朝右 / y 朝下，
-  // 而 body 系是 x 前 / y 左 / z 上 —— 两者差一个固定旋转 RPY(-90°, 0, -90°)。
-  // 少广播这一帧，客户拿 TF 去投影深度图会得到**错误但看起来合理**的结果
-  // （这正是本项目最怕的那类 bug：不报错）。
+  // 相机的**光学帧**：ROS 约定图像数据是 z 朝前 / x 朝右 / y 朝下，而 body 系是
+  // x 前 / y 左 / z 上，两者差一个固定旋转 RPY(-90°, 0, -90°)。少广播这一帧，
+  // 客户拿 TF 投影深度图会得到**错误但看起来合理**的结果（本项目最怕的那类 bug）。
   static_tf_broadcaster_->sendTransform(makeTransformRpy(
       stamp, camera_frame_, camera_optical_frame_, 0.0, 0.0, 0.0, -M_PI / 2.0, 0.0,
       -M_PI / 2.0));
@@ -334,10 +325,8 @@ std::size_t MockRobotNode::ensureJoint(const std::string &name) {
 
 MockRobotNode::RobotStatus
 MockRobotNode::makeStatus(std::lock_guard<std::mutex> & /*lock*/) const {
-  // 参数不命名 = 一眼看出它是**凭证**，不是数据。
-  // 它不是"自己加锁"，所以这里绝不能再 lock 一次 —— 调用方已经持锁了。
-  //
-  // 后续轮次加导航/运动时，**只在这里加分支**，状态话题与服务会自动同步。
+  // 参数不命名 = 一眼看出它是**凭证**不是数据；它不是"自己加锁"，所以这里绝不能再 lock。
+  // 后续加导航/运动状态时**只在这里加分支**，状态话题与服务会自动同步。
   RobotStatus status;
   status.header.stamp = now();
   status.header.frame_id = config_.navigation.base_frame;
@@ -521,10 +510,9 @@ void MockRobotNode::motionTick() {
   tickAction<MoveToJointPositions>(
       mutex_, motion_.slot,
       [this](std::lock_guard<std::mutex> &lock) -> TickOutput<MoveToJointPositions> {
-        // 每个关节各自朝目标走一步，速度走**梯形**曲线：
-        //   · 上限是 max_velocity
-        //   · 靠近目标时按"现在开始减速、正好停住"降速，所以不会冲过头
-        //   · 速度本身每拍最多变 max_acceleration * 周期，所以起步和收尾是渐进的
+        // 每个关节各朝目标走一步，速度走**梯形**曲线：上限是 max_velocity；靠近目标时
+        // 按"现在开始减速、正好停住"降速，不会冲过头；速度每拍最多变 max_accel * 周期，
+        // 所以起步和收尾是渐进的。
         const double dt = kControlPeriodS;
         const double accel = motion_.max_acceleration;
         const double dv = accel > 0.0 ? accel * dt : std::numeric_limits<double>::infinity();
@@ -768,14 +756,9 @@ void MockRobotNode::publishSensors(const rclcpp::Time &stamp) {
     // ── 锁内：降频 + 组装（不碰发布）──
     std::lock_guard<std::mutex> lock(mutex_);
 
-    // 降频判断其实**可以**放在锁外：`sensor_divider_` 只有控制回路这一条车道会碰
-    // （`controlTick` 全在 timer_group_ 的互斥组里，不会和自己并发），严格说不需要锁。
-    // 仍然放在锁内，是为了守住一条更简单的规则：
-    //   **`mutex_` 下面那一块成员，全部在锁内访问，没有例外。**
-    // 挪出去省下的是一次无争用的 lock/unlock（纳秒级，量不出来），
-    // 代价却是引入一个"这个成员其实不受保护"的例外 —— 以后有人在别的车道
-    // 顺手读它，就是**静默的数据竞争**。判据同 §4.5 / §6.3：不为量不到的收益加规则。
-    // （`last_yaw_` 是同一类。）
+    // 降频判断其实可以放锁外（sensor_divider_ 只有控制回路这条车道碰），但仍放锁内，
+    // 为的是守住"mutex_ 下面那块成员全部在锁内访问、没有例外"。挪出去只省一次纳秒级的
+    // 无争用 lock，却引入"这个成员不受保护"的例外 ⇒ 日后别的车道顺手读就是静默数据竞争。
     if (++sensor_divider_ < kSensorEveryNTicks) {
       return; // 还没到下一拍
     }
@@ -899,10 +882,9 @@ MockRobotNode::makeDepthImage(std::lock_guard<std::mutex> & /*lock*/,
       const double oz = 1.0;
       const double norm = std::sqrt(ox * ox + oy * oy + oz * oz);
 
-      // 光学 (x 右, y 下, z 前) → body (x 前, y 左, z 上)：
-      //     body_x = z,   body_y = -x,   body_z = -y
+      // 光学 (x 右, y 下, z 前) → body (x 前, y 左, z 上)：body = (z, -x, -y)。
       // 这一步对应上面那条 RPY(-90°, 0, -90°) 的静态 TF —— 两者必须配套，
-      // 否则发出去的深度图和 TF 各说各话（而且都不报错）。
+      // 否则深度图和 TF 各说各话（而且都不报错）。
       const double bx = oz / norm;
       const double by = -ox / norm;
       const double bz = -oy / norm;
@@ -936,10 +918,7 @@ MockRobotNode::makeDepthImage(std::lock_guard<std::mutex> & /*lock*/,
 
 sensor_msgs::msg::PointCloud2
 MockRobotNode::makePointCloud(const sensor_msgs::msg::Image &depth) const {
-  // 从深度图**反投影**：每个像素 (u, v) + 它的 z 深度 → 光学系里的一个三维点。
-  //   x = (u - cx) * z / fx
-  //   y = (v - cy) * z / fy      （fy = fx，像素是正方形的）
-  //   z = z 深度本身
+  // 从深度图**反投影**：x = (u - cx) * z / fx，y = (v - cy) * z / fx，z 就是深度本身。
   // **信息量和深度图完全一样**，只是排布从"表格"变成了"散点"。
   const double fx = cameraFocalLength();
   const double cx = kDepthWidth / 2.0;

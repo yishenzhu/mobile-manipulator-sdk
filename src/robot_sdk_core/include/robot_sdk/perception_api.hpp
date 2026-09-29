@@ -18,11 +18,9 @@
 
 namespace robot_sdk {
 
-/// 机器人板载传感器的访问入口。
-///
-/// 传感器是**持续流式**的，所以这里暴露的是「最新样本」+「阻塞等待」，
-/// 而不是消息队列。timeout 传 0（默认值）表示"用配置里的
-/// perception.sensor_timeout_s"。
+/// 机器人板载传感器的访问入口。传感器是**持续流式**的，所以这里给的是
+/// 「最新样本」+「阻塞等待」，而不是消息队列。timeout 传 0（默认）表示
+/// "用配置里的 perception.sensor_timeout_s"。
 class PerceptionAPI {
  public:
   using Duration = std::chrono::duration<double>;
@@ -33,11 +31,9 @@ class PerceptionAPI {
   using CameraInfo = sensor_msgs::msg::CameraInfo;
   using PointCloud2 = sensor_msgs::msg::PointCloud2;
 
-  // 读路径返回 ConstSharedPtr 而不是按值 —— 这是刻意的：
-  //   - 读操作只增加一次引用计数，O(1)，与消息大小无关
-  //   - 若按值返回，Image(≈600 KB) / PointCloud2(可达数 MB) 每次读都要深拷贝
-  //   - const 让缓存发出去的数据谁都改不了 —— 编译期免疫一整类数据竞争
-  //   - 这本来就是 ROS 2 订阅回调的原生类型，零转换成本
+  // 读路径返回 ConstSharedPtr 而不是按值：只加一次引用计数（O(1)），
+  // 而 Image ≈600 KB、PointCloud2 可达数 MB，按值返回每次读都要深拷贝；
+  // const 还能在编译期免疫一整类数据竞争。
   using LaserScanPtr = LaserScan::ConstSharedPtr;
   using ImuPtr = Imu::ConstSharedPtr;
   using ImagePtr = Image::ConstSharedPtr;
@@ -45,10 +41,8 @@ class PerceptionAPI {
   using PointCloud2Ptr = PointCloud2::ConstSharedPtr;
 
   /// 只接收自己需要的那一份配置（接口隔离）。
-  ///
-  /// 注意话题名用的是**相对名**（"scan" 这种），不自己拼命名空间前缀 ——
-  /// rcl 会在创建订阅时按节点命名空间自动展开。想要不同的命名空间，
-  /// 正确做法是把节点建在那个命名空间里，而不是逐名字覆盖。
+  /// ⚠️ 话题名是**相对名**，不自己拼前缀 —— rcl 会按节点命名空间展开。
+  /// 想要别的命名空间就把节点建在那儿，而不是逐名字覆盖。
   PerceptionAPI(const rclcpp::Node::SharedPtr& node,
                 const rclcpp::CallbackGroup::SharedPtr& callback_group,
                 const PerceptionConfig& config);

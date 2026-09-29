@@ -83,10 +83,8 @@ struct PoseFeedback {
   double completion_percentage{0.0};
 };
 
-/// 关节空间运动，含机械臂与夹爪。
-///
-/// 对准的是 **SDK 自己的运动 action**；实际部署时由一层适配器转到
-/// MoveIt / ros2_control 上，而客户感觉不到。
+/// 关节空间运动，含机械臂与夹爪。对准的是 **SDK 自己的运动 action**，
+/// 实际部署时由适配器转到 MoveIt / ros2_control 上，客户感觉不到。
 class MotionAPI {
  public:
   using Action = robot_sdk_interfaces::action::MoveToJointPositions;
@@ -112,9 +110,7 @@ class MotionAPI {
   Result<PoseResult> moveToPose(const PoseGoal& goal);
 
   /// 移动到 `MotionConfig::named_targets` 里声明的具名位姿（如 "home"）。
-  ///
-  /// ⚠️ 那个字段是 `map<string, vector<double>>`，而 **ROS 2 参数没有 map 类型**，
-  ///    所以它**无法通过 launch 文件配置**，只能由代码赋值（见 学习笔记.md 的 C4）。
+  /// ⚠️ 那个字段是 map，而 **ROS 2 参数没有 map 类型** ⇒ 无法用 launch 配置，只能代码赋值。
   Result<MotionResult> moveToNamedTarget(const std::string& name);
 
   Result<MotionResult> home();

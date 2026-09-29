@@ -1,12 +1,6 @@
-// 假 move_group：**不做任何规划**，只为把 moveit_adapter 的翻译摊开来看。
-//
-// 它干的全部事情：
-//   ① 收到 MoveGroup 目标 → **原样转发**到 `goal_topic`（latch 的，晚到的订阅者也拿得到）
-//   ② 等 `delay_s` 之后按 `result` 参数回成功或失败
-//   ③ 期间发两条 feedback（PLANNING → MONITOR），好让适配器的反馈翻译有东西可翻
-//
-// 它**不验**的东西（那些是 MoveIt 的活）：逆解对不对、路径避不避障、时间参数化合不合理、
-// max_cartesian_speed 到底有没有生效（那要 LimitMaxCartesianLinkSpeed 适配器参与）。
+// 假 move_group：**不做任何规划**，只为把 moveit_adapter 的翻译摊开来看 —— 把收到的目标
+// 原样转发到 `goal_topic`（latch），等 `delay_s` 后按 `result` 参数回成功/失败，期间发两条
+// feedback。逆解、避障、时间参数化都不归它验（那是 MoveIt 的活）。
 #include <chrono>
 #include <memory>
 #include <mutex>

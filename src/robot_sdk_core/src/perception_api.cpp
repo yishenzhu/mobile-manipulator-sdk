@@ -11,14 +11,9 @@
 namespace robot_sdk {
 namespace {
 
-/// 五个 waitForXxx 的唯一差别是「缓存 + 名字」，所以抽成一个模板。
-/// （公开 API 保持逐一列出 —— 显式的接口列表比"一个万能函数"更好用，
-///   但实现没必要复制五遍。）
-///
-/// 名字参数用 const std::string&：
-///   - 函数只读它、不保存它 → 引用绑定安全（参数绑定的临时对象活到函数返回）
-///   - 调用点传字面量会构造一个临时 std::string，短标签落在 SSO 内、无堆分配
-///   - 明确"不拥有"，比传值少一次所有权语义的思考
+/// 五个 waitForXxx 的唯一差别是「缓存 + 名字」，所以抽成一个模板
+/// （公开 API 仍逐一列出 —— 显式接口比"一个万能函数"好用，但实现不必复制五遍）。
+/// 名字参数用 const std::string&：只读不存，传字面量时短标签落在 SSO 内、无堆分配。
 template <typename PtrT>
 Result<PtrT> waitForCache(LatestValueCache<PtrT> &cache,
                           PerceptionAPI::Duration timeout,
@@ -38,23 +33,17 @@ PerceptionAPI::PerceptionAPI(
     const PerceptionConfig &config)
     : node_(node), config_(config) {
   rclcpp::SubscriptionOptions options;
-  // ★ 这一行决定了所有传感器回调落在哪个回调组里。
-  //   Robot 传进来的是 sensor 组（Reentrant），于是五个高频传感器可以并发。
-  //   忘了传它 → 回调落入默认组（MutuallyExclusive）→ 全部串行，
-  //   精心设计的并发隔离静默失效，而且运行时不报错。
+  // ★ 这一行决定所有传感器回调落在哪个回调组：Robot 传的是 sensor 组（Reentrant），
+  //   五个高频传感器才并发。忘了传 ⇒ 落进默认组（互斥）⇒ 全部串行、静默失效、运行时不报错。
   options.callback_group = callback_group;
 
   auto qos = rclcpp::SensorDataQoS();
-  // 把配置里的 queue_depth 真正接到 QoS 上。
-  // 注意 rclcpp::SensorDataQoS() 的默认深度是 5，与配置默认值 10 并不相同 ——
-  // 不写这一行的话，perception.queue_depth 就是个"改了不生效"的死配置
-  // （launch 文件里写 50 也不会有任何变化）。
+  // 把配置里的 queue_depth 接到 QoS 上：SensorDataQoS() 默认深度是 5，与配置默认值 10
+  // 并不相同 —— 不写这行，perception.queue_depth 就是个"改了不生效"的死配置。
   qos.keep_last(static_cast<std::size_t>(config_.queue_depth));
 
-  // 话题名直接用**相对名**（"scan" 这种），不自己拼前缀。
-  // rcl 会在创建订阅时按节点命名空间自动展开成 "/robot1/scan" ——
-  // 这是 ROS 2 的内建机制，重复实现它只会多出一套可能不一致的规则。
-  // 想要不同的命名空间，正确做法是把节点建在那个命名空间里。
+  // 话题名用**相对名**（"scan"），不自己拼前缀 —— rcl 会按节点命名空间展开。
+  // 想要别的命名空间就把节点建在那儿，重复实现这套规则只会多出一份不一致的。
   laser_scan_subscription_ = node_->create_subscription<LaserScan>(
       config_.laser_scan_topic, qos,
       [this](LaserScan::ConstSharedPtr msg) { laser_scan_.update(msg); },

@@ -14,34 +14,13 @@
 
 namespace robot_sdk {
 
-/// 实现细节：节点 + 回调组 + 执行器的持有者。
-///
-/// **故意只前向声明** —— 它是 SDK 内部管道，客户不需要知道它存在。
-/// （完整定义只出现在 robot.cpp 里。）
+/// 实现细节：节点 + 回调组 + 执行器的持有者。**故意只前向声明** ——
+/// 它是 SDK 内部管道，客户不需要知道它存在（完整定义只在 robot.cpp 里）。
 class RobotRuntime;
 
-/// Robot SDK 的入口。
-///
-/// 一个 `Robot` = 四个能力 API（导航 / 运动 / 感知 / 状态）装进一个对象，
-/// 并持有它们所需的 ROS 2 管道。两种构造方式对应两种宿主关系：
-///
-///   - `Robot(config)`            —— SDK 自建节点与执行器，调 `spin()` 驱动；
-///   - `Robot(node, config)`      —— 挂到已有节点上，由调用方继续 spin（不抢线程）。
-///
-/// 想要什么持有方式由客户决定：
-///
-///     auto a = std::make_shared<Robot>(config);   // shared_ptr
-///     Robot b(config);                            // 栈对象
-///     auto c = std::make_unique<Robot>(config);   // unique_ptr
-///
-/// **这里也是并发契约的落点**（谁走哪条车道在构造函数里定死）：
-///
-/// | 能力 | 回调组 | 类型 |
-/// |---|---|---|
-/// | `navigation()` / `motion()` | control | 互斥 |
-/// | `perception()` | sensor | 可重入 |
-/// | `status()` | status | 互斥 |
-/// | `tf()` | **自建独占组** | 互斥 |
+/// Robot SDK 的入口：四个能力 API（导航/运动/感知/状态）装进一个对象，并持有 ROS 2 管道。
+/// 两种构造对应两种宿主关系：`Robot(config)` 自建节点与执行器（调 spin() 驱动）；
+/// `Robot(node, config)` 挂到已有节点上、由调用方 spin。并发契约见 detail/runtime.hpp。
 class Robot {
  public:
   /// 自建节点 + 多线程执行器 —— 调 `spin()` 就转起来了。

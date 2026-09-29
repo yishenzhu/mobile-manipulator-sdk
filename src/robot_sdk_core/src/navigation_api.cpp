@@ -122,10 +122,8 @@ void NavigationAPI::cancelAll() {
                        }),
         active_handles_.end());
 
-    // 注意 weak.lock() 拿到的是**强引用**：从这里开始对象由 handles 保活，
-    // 即使客户在另一线程丢掉他自己的 shared_ptr，也不会在锁外析构。
-    // （反例：若把 weak_ptr 拷进 vector、锁外再
-    // lock()，那才可能取到时已经死了。）
+    // weak.lock() 拿到的是**强引用**：对象从此由 handles 保活，即使客户在另一线程丢掉
+    // 自己的 shared_ptr 也不会在锁外析构（把 weak_ptr 拷进 vector 再锁外 lock 就会）。
     for (auto &weak : active_handles_) {
       if (auto handle = weak.lock()) {
         handles.push_back(std::move(handle));

@@ -35,22 +35,17 @@ controller_server:
       plugin: "nav2_controller::SimpleGoalChecker"
       xy_goal_tolerance: 0.15
       yaw_goal_tolerance: 0.25
-    # 原地转正交给 shim，路径跟踪还是 RPP（shim 会在内部把 RPP 造出来）。
-    # 27c 那轮没有 shim，只能靠调大 max_angular_accel 把 RPP 的"每拍从零重算"
-    # 顶上去（实发角速度 = min(请求值, max_angular_accel ÷ 控制频率)）。
-    # 现在转角速度由 shim 直接说了算，不再依赖那个隐含关系。
+    # 原地转正交给 shim，路径跟踪还是 RPP（shim 在内部把 RPP 造出来）。
+    # 27c 那轮没有 shim，只能调大 max_angular_accel 顶上去（实发角速度 =
+    # min(请求值, max_angular_accel ÷ 控制频率)）；现在转角速度由 shim 直接说了算。
     FollowPath:
       plugin: "nav2_rotation_shim_controller::RotationShimController"
       # ⚠️ 这里要写**插件类名**，不是 controller_plugins 里的实例名 ——
       #    写错的话 shim 造不出内部控制器，controller_server 会直接段错误。
       primary_controller: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
-      # 两层各管一段，而且**门槛必须错开**：
-      #   · shim —— 只在"朝向和路径差得**很多**"时先原地转正（它追的是**路径起点**的朝向）
-      #   · RPP  —— 误差小于这个门槛才轮到它；**终点那个朝向也是它转的**，shim 不管
-      # ⚠️ 门槛要**大于** RPP 的 rotate_to_heading_min_angle（默认 0.785）。
-      #    反过来设（比如 0.35）会让 shim 抢着管 20°~45° 那一段 —— 而终点附近路径
-      #    退化成一个点，"路径起点朝向"根本不是目标朝向，两层就互相拆台。
-      #    【量】实测：门槛 0.35 时机器人回到原点却卡在 -102.6°，1.79 rad 的朝向差永远转不完。
+      # 两层各管一段，门槛必须错开：shim 只管"朝向差很多"时原地转正（追**路径起点**朝向），
+      # 误差小于此门槛才轮到 RPP（**终点朝向也归 RPP**）。⚠️ 门槛要**大于** RPP 的
+      # rotate_to_heading_min_angle(0.785)；实测设 0.35 会卡在 -102.6°（两层互相拆台）。
       angular_dist_threshold: 1.5
       # 所以 RPP 的原地转速度也必须有保证（同名的 max_angular_accel 两层共用）：
       # 默认 3.2 ÷ 20 Hz = 0.16 rad/s，转 143° 要 15 s，会被 progress_checker 判死。

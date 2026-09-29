@@ -49,9 +49,8 @@ TEST(ConfigTest, NormalizeNamespaceProducesCanonicalForm) {
 }
 
 /// fromNode 需要一个真的 rclcpp::Node，所以要初始化 rclcpp。
-/// 注意用 SetUpTestSuite / TearDownTestSuite（整个 fixture 各一次），
-/// 而不是 SetUp / TearDown（每个 TEST_F 各一次）——
-/// rclcpp::init 只能调一次。
+/// ⚠️ 用 SetUpTestSuite / TearDownTestSuite（整个 fixture 各一次）而不是 SetUp / TearDown
+/// （每个 TEST_F 各一次）—— rclcpp::init 只能调一次。
 class ConfigNodeTest : public ::testing::Test {
  protected:
   static void SetUpTestSuite() {
@@ -141,14 +140,9 @@ TEST_F(ConfigNodeTest, RawTrailingSlashNamespaceThrows) {
   EXPECT_THROW(std::make_shared<rclcpp::Node>("ns_bad_double", "//", options), std::exception);
 }
 
-/// 这条测试守住的是 SDK 的**前提**。
-///
-/// SDK 现在把相对话题名（"scan"）直接交给 rcl，依赖它按节点命名空间
-/// 自动展开 —— 自己不再拼前缀。所以必须把 rcl 的这个行为钉住：
-/// 它一旦变了，SDK 的行为会**静默**改变。
-///
-/// 这也解释了为什么"想要不同命名空间"的正确做法是**建一个该命名空间的节点**，
-/// 而不是逐个名字去覆盖前缀。
+/// 这条测试守住 SDK 的**前提**：相对话题名（"scan"）直接交给 rcl 按节点命名空间展开，
+/// 自己不再拼前缀 —— 把 rcl 这个行为钉住，它一变 SDK 会**静默**改变。
+/// 这也是"想要不同命名空间就建一个该命名空间的节点"的原因。
 TEST_F(ConfigNodeTest, RelativeTopicNamesExpandUsingNodeNamespace) {
   rclcpp::NodeOptions options;
   auto node = std::make_shared<rclcpp::Node>("topic_ns_probe", "/robot1", options);

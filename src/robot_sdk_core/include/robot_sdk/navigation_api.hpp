@@ -31,14 +31,8 @@ struct NavigationGoal {
   /// 速度上限。**<= 0 表示"由后端自己决定"**（哨兵值，与 timeout_s 同一约定）。
   double max_speed{0.0};
 
-  /// 是否避障。
-  ///
-  /// **`true` = 走不到就别走**：路上被挡时后端应当**绕开**；绕不开的（比如模拟器）
-  /// 至少**别撞上去** —— 它会当场报失败。`false` = 不管，直冲。
-  ///
-  /// ⚠️ 各后端做到什么程度不一样：
-  ///   - mock：会预检"目标走得到吗"，挡着就报失败（**它不会绕路**，只保证不撞）；
-  ///   - Nav2 适配器：**始终避障**，所以 `false` 兑现不了（会打 WARN）。
+  /// 是否避障。true = 走不到就别走（mock 会预检目标可达性，挡着就报失败，但它不绕路）；
+  /// false = 不管直冲（Nav2 适配器**始终避障**，兑现不了 false，会打 WARN）。
   bool avoid_obstacles{true};
 
   /// 超时秒数。**<= 0 = 用 `NavigationConfig::default_timeout_s`**。
@@ -61,10 +55,8 @@ struct NavigationFeedback {
   std::string state{};
 };
 
-/// "去某个地方"这一层抽象的导航能力。
-///
-/// 实现只跟 **SDK 自己的导航 action** 打交道（通常由一层适配器转到 Nav2 上），
-/// 所以客户既不依赖 Nav2 的消息类型，也不关心导航栈能不能换。
+/// "去某个地方"这一层抽象的导航能力。实现只跟 **SDK 自己的导航 action** 打交道
+/// （由适配器转到 Nav2 上），所以客户不依赖 Nav2 的消息类型，也不关心导航栈换不换。
 class NavigationAPI {
  public:
   using Action = robot_sdk_interfaces::action::NavigateToPose;

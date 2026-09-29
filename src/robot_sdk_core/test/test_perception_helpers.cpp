@@ -29,11 +29,8 @@ sensor_msgs::msg::LaserScan makeScan() {
 
 TEST(ScanUtilsTest, NearestIgnoresInvalidReturnsAndOutOfRangeEchoes) {
   const auto scan = makeScan();
-  // index 0: inf      -> 忽略（没打中）
-  // index 1: 1.0      -> 有效  ← 最近
-  // index 2: NaN      -> 忽略（无效读数）
-  // index 3: 0.05     -> 忽略（低于 range_min，盲区内）
-  // index 4: 3.0      -> 有效
+  // 回波依次：inf（没打中，忽略）、1.0（有效 ← 最近）、NaN（无效读数，忽略）、
+  //           0.05（低于 range_min，盲区内，忽略）、3.0（有效）
   EXPECT_DOUBLE_EQ(1.0, nearestObstacleDistance(scan));
 }
 

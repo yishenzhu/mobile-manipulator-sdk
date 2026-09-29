@@ -7,9 +7,7 @@ namespace robot_sdk {
 namespace {
 
 /// 声明参数（用默认值）并读回。
-///
-/// 为什么必须先声明再读：ROS 2 强制参数先声明后使用。
-/// 这不是刁难 —— 它让你把参数名拼错时立刻抛异常，
+/// ROS 2 强制"先声明后使用"：这不是刁难，它让你把参数名拼错时立刻抛异常，
 /// 而不是静默地永远拿到默认值。
 template <typename T>
 T declareAndGet(rclcpp::Node &node, const std::string &name,
@@ -78,10 +76,8 @@ RobotConfig RobotConfig::fromNode(rclcpp::Node &node) {
       node, "motion.gripper_closed_position", cfg.motion.gripper_closed_position);
   cfg.motion.gripper_timeout_s = declareAndGet<double>(
       node, "motion.gripper_timeout_s", cfg.motion.gripper_timeout_s);
-  // 注意：motion.named_targets 故意不在这里读。
-  // 它是 map<string, vector<double>>，而 ROS 2 的参数类型只有
-  // bool / int64 / double / string 以及它们的数组 —— 没有 map 类型，
-  // 无法用参数表达。只能由代码直接设置。
+  // ⚠️ motion.named_targets 故意不在这里读：它是 map，而 ROS 2 参数只有
+  // bool/int64/double/string 及其数组，没有 map 类型 ⇒ 只能由代码直接设置。
 
   cfg.perception.laser_scan_topic = declareAndGet<std::string>(
       node, "perception.laser_scan_topic", cfg.perception.laser_scan_topic);

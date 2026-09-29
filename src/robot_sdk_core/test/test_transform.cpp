@@ -18,15 +18,9 @@ using namespace std::chrono_literals;
 
 namespace {
 
-/// 在后台 spin 一个节点，析构时保证把线程收干净。
-///
-/// 为什么需要它：`TransformManager` 用 spin_thread = false，/tf 订阅挂在**节点**上，
-/// 必须有人 spin 节点才能收到消息 —— 生产环境里那是 `RobotRuntime` 的
-/// MultiThreadedExecutor 干的，测试里得自己模拟。
-///
-/// 为什么用 RAII 而不是"最后手动 cancel+join"：gtest 的 ASSERT_* 会直接
-/// return 出测试体，手动清理会被跳过，留下一个没 join 的线程 → 进程退出时卡住。
-/// 让析构负责，就没有"忘记清理"这条路径。
+/// 在后台 spin 一个节点，析构时把线程收干净。需要它是因为 TransformManager 用
+/// spin_thread=false，/tf 订阅挂在节点上，得有人 spin（生产里是 RobotRuntime 的执行器）。
+/// ⚠️ 用 RAII 而不是手动收尾：gtest 的 ASSERT_* 会直接 return，手动清理会被跳过。
 class NodeSpinner {
  public:
   explicit NodeSpinner(rclcpp::Node::SharedPtr node) : node_(std::move(node)) {
@@ -117,12 +111,9 @@ TEST_F(TransformTest, LookupSucceedsWithPublishedStaticTransform) {
   t.transform.translation.z = 0.0;
   t.transform.rotation.w = 1.0;
 
-  // 轮询 + **重发**，最多约 10 秒。
-  //
-  // 为什么要重发：发布者与订阅者之间要经过 DDS 发现，这个延迟不受我们控制。
-  // 只发一次、然后死等，就会在发现慢的时候偶发失败（这类"跑一百次挂一次"的
-  // 测试最消耗信任）。反复发 + 轮询把发现延迟变成"多等几轮"，而不是失败。
-  // 正常情况第一轮就成功，所以通过时几乎不花时间。
+  // 轮询 + **重发**，最多约 10 秒。要重发是因为 DDS 发现延迟不受我们控制：只发一次
+  // 再死等，会在发现慢时偶发失败（"跑一百次挂一次"最消耗信任）。反复发把发现延迟变成
+  // "多等几轮"而不是失败，而正常情况第一轮就成功，几乎不花时间。
   bool ready = false;
   for (int i = 0; i < 50 && !ready; ++i) {
     broadcaster->sendTransform(t);

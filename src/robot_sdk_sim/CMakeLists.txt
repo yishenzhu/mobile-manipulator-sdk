@@ -29,10 +29,8 @@ add_executable(mock_robot_node
     src/mock_robot_main.cpp
     src/joint_spec.cpp
 )
-# 注意这里**不用** $<BUILD_INTERFACE:...>：这个路径是 PRIVATE 的
-# （不往外传播），而且这个可执行文件不导出 —— 所以"构建树 vs 安装树"的分歧
-# 根本不存在，直接写路径即可。
-# （那句生成器表达式只在路径要传播给别人时才有意义，见 robot_sdk_core 的写法。）
+# 不用 $<BUILD_INTERFACE:...>：这个 include 是 PRIVATE、可执行文件也不导出，
+# 所以"构建树 vs 安装树"的分歧根本不存在（那句生成器表达式只在路径要传播时才有意义）。
 target_include_directories(mock_robot_node PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )

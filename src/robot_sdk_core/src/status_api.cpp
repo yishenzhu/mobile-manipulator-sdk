@@ -45,10 +45,8 @@ StatusAPI::StatusAPI(const rclcpp::Node::SharedPtr& node,
       config_.joint_states_topic, rclcpp::SensorDataQoS(),
       [this](JointState::ConstSharedPtr msg) { joint_state_cache_.update(msg); }, options);
 
-  // service client 也要指定回调组 —— 否则响应回调会落到默认组。
-  // QoS 用 rclcpp::ServicesQoS()：它的默认初始化就是
-  // QoSInitialization::from_rmw(rmw_qos_profile_services_default)，
-  // 与旧写法完全等价；而旧的 rmw_qos_profile_t 重载在 Jazzy 已标记 deprecated。
+  // service client 也要指定回调组，否则响应回调会落到默认组。
+  // QoS 用 rclcpp::ServicesQoS() —— 与旧写法等价，而 rmw_qos_profile_t 重载在 Jazzy 已 deprecated。
   status_client_ = node_->create_client<GetRobotStatus>(
       config_.get_status_service, rclcpp::ServicesQoS(), callback_group_);
 }
