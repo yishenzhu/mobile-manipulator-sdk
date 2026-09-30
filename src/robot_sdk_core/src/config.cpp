@@ -106,20 +106,4 @@ RobotConfig RobotConfig::fromNode(rclcpp::Node &node) {
   return cfg;
 }
 
-std::string normalizeNamespace(const std::string &ns) {
-  if (ns.empty()) {
-    return ns;
-  }
-  std::string out = ns;
-  if (out.front() != '/') {
-    out.insert(out.begin(), '/'); // "robot1" → "/robot1"
-  }
-  // 削掉全部尾部斜杠。允许削成空串 —— 只由 '/' 组成的输入表示根命名空间，
-  // 而 ROS 2 拒绝 "//"，只接受 "/"（等价于根）。
-  while (!out.empty() && out.back() == '/') {
-    out.pop_back();
-  }
-  return out;
-}
-
 }  // namespace robot_sdk

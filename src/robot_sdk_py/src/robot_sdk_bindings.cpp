@@ -644,7 +644,15 @@ PYBIND11_MODULE(_robot_sdk, m) {
              if (!rclcpp::ok()) {
                rclcpp::init(0, nullptr);
              }
-             return std::make_unique<Robot>(config);
+             // 构造期没有 Result 通道，配置不合法只能以异常形式出来。rclcpp 抛的是它自己的类型
+             // （到 Python 会变成 ValueError），这里翻成 SDK 的异常 ⇒ Python 侧只剩 RobotSdkError。
+             try {
+               return std::make_unique<Robot>(config);
+             } catch (const SdkException&) {
+               throw;
+             } catch (const std::exception& e) {
+               throw SdkException(Error::InvalidArgument(e.what()));
+             }
            }),
            py::arg("config") = RobotConfig{})
       .def("navigation", &Robot::navigation, py::return_value_policy::reference_internal)

@@ -37,20 +37,6 @@ TEST(ConfigTest, NestedStructsAreDefaultConstructed) {
   EXPECT_DOUBLE_EQ(cfg.motion.gripper_timeout_s, 5.0);  // 独立于 default_timeout_s
 }
 
-TEST(ConfigTest, NormalizeNamespaceProducesCanonicalForm) {
-  // ROS 2 规则：namespace 不能以 '/' 结尾，除非它只有 '/'。
-  // 违反的例子 "/robot1/" 会让 rclcpp::Node 抛 InvalidNamespaceException，
-  // 也就是节点根本建不起来 —— 所以这个函数是安全网。
-  EXPECT_EQ(normalizeNamespace(""), "");
-  EXPECT_EQ(normalizeNamespace("robot1"), "/robot1");
-  EXPECT_EQ(normalizeNamespace("/robot1"), "/robot1");
-  EXPECT_EQ(normalizeNamespace("/robot1/"), "/robot1");
-  EXPECT_EQ(normalizeNamespace("robot1///"), "/robot1");
-  EXPECT_EQ(normalizeNamespace("/"), "");    // 根 → 空串（等价）
-  EXPECT_EQ(normalizeNamespace("//"), "");   // 非法输入 → 合法结果
-  EXPECT_EQ(normalizeNamespace("///"), "");
-}
-
 /// fromNode 需要一个真的 rclcpp::Node，所以要初始化 rclcpp。
 /// ⚠️ 用 SetUpTestSuite / TearDownTestSuite（整个 fixture 各一次）而不是 SetUp / TearDown
 /// （每个 TEST_F 各一次）—— rclcpp::init 只能调一次。
@@ -117,25 +103,22 @@ TEST_F(ConfigNodeTest, ReadsEveryParameterGroup) {
   EXPECT_EQ(cfg.perception.imu_topic, "imu");
 }
 
-TEST_F(ConfigNodeTest, NormalizedNamespaceIsAcceptedByRclcpp) {
-  // 决定性验证：归一化后的结果必须是 rclcpp 能接受的。
-  // 否则节点构造会抛 InvalidNamespaceException —— 整个 SDK 起不来。
-  // 对照组："/robot1/" 和 "//" 原样传给 rclcpp 是会抛异常的。
+/// SDK 不再替调用者归一化（`normalizeNamespace` 已删）—— 这里钉住"rcl 自己接受哪些写法"。
+/// 重点是 `robot1`（缺前导 '/'）：rcl 本来就会补上，所以 SDK 那一层是多余的。
+TEST_F(ConfigNodeTest, RclcppAcceptsNamespacesWithoutLeadingSlash) {
   int index = 0;
-  for (const std::string raw : {"robot1", "/robot1", "/robot1/", "robot1///", "/", "//"}) {
-    const std::string ns = normalizeNamespace(raw);
+  for (const std::string raw : {"", "robot1", "/robot1"}) {
     rclcpp::NodeOptions options;
     EXPECT_NO_THROW({
-      auto node = std::make_shared<rclcpp::Node>("ns_check_" + std::to_string(index), ns, options);
+      auto node = std::make_shared<rclcpp::Node>("ns_ok_" + std::to_string(index), raw, options);
       node.reset();
-    }) << "raw = " << raw << ", normalized = " << ns;
+    }) << "raw = " << raw;
     ++index;
   }
 }
 
-/// 反向验证：证明"为什么必须有 normalizeNamespace"。
-/// 这条测试故意传入非法命名空间，断言它确实会抛 ——
-/// 如果哪天 rclcpp 变宽松了，这条会失败，提醒我们这个安全网可以重新评估。
+/// 钉住 rcl 自己的规则：这些输入它拒绝，而 SDK **不再替它修**（`normalizeNamespace` 已删）。
+/// 如果哪天 rclcpp 变宽松了，这条会失败 —— 那时才需要重新讨论要不要兜。
 TEST_F(ConfigNodeTest, RawTrailingSlashNamespaceThrows) {
   rclcpp::NodeOptions options;
   EXPECT_THROW(std::make_shared<rclcpp::Node>("ns_bad_trailing", "/robot1/", options),

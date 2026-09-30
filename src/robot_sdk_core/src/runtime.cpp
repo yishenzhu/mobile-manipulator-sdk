@@ -11,8 +11,10 @@ RobotRuntime::RobotRuntime(const RobotConfig& config) : config_(config) {
   options.parameter_overrides({rclcpp::Parameter("use_sim_time", config_.use_sim_time)});
 
   // 名字 + 命名空间，两个正交的参数（rclcpp::Node(name, namespace_, options)）。
-  node_ = std::make_shared<rclcpp::Node>(config_.node_name,
-                                        normalizeNamespace(config_.node_namespace), options);
+  // 合法性交给 rcl 判 —— 它才是 ROS 名字语法的所有者。SDK 不自己定第二套规则、
+  // 也不替调用者修正写错的配置。参数不合法时这里抛 rclcpp 的异常，Python 侧在
+  // 语言边界上把它翻成 RobotSdkError（见 robot_sdk_py 的绑定）。
+  node_ = std::make_shared<rclcpp::Node>(config_.node_name, config_.node_namespace, options);
 
   // 关键：多线程执行器。默认的单线程执行器会把所有回调串成一条线。
   executor_ = std::make_shared<rclcpp::executors::MultiThreadedExecutor>();

@@ -68,3 +68,31 @@ def test_failure_raises_robot_sdk_error():
         assert "INVALID_ARGUMENT" in str(excinfo.value)
     finally:
         robot.stop()
+
+
+def test_bad_config_raises_robot_sdk_error():
+    """构造期的配置错误也必须落在 RobotSdkError 上，不能漏成 rclcpp 的 ValueError。
+
+    `normalizeNamespace` 删掉之后，SDK 不再替调用者修正命名空间 —— 非法输入交给 rcl 拒绝，
+    绑定在语言边界上把那个异常翻成 SDK 的异常。`RobotSdkError` 的基类是 `Exception`，
+    所以以前的 `ValueError` 是 `except RobotSdkError:` **接不住**的。
+    """
+    for bad in ("/robot1/", "/a//b", "//"):
+        with pytest.raises(robot_sdk.RobotSdkError) as excinfo:
+            robot_sdk.Robot(
+                robot_sdk.RobotConfig(node_name="bad_ns_probe", node_namespace=bad))
+        assert "INVALID_ARGUMENT" in str(excinfo.value), bad
+
+    # 节点名不合法走的是同一条路（以前它就抛，只是没人翻）
+    with pytest.raises(robot_sdk.RobotSdkError) as excinfo:
+        robot_sdk.Robot(robot_sdk.RobotConfig(node_name="bad name"))
+    assert "INVALID_ARGUMENT" in str(excinfo.value)
+
+
+def test_namespace_without_leading_slash_is_accepted():
+    """rcl 本来就接受缺前导 '/' 的写法，所以 SDK 不再替它补 —— 这里钉住这条靠得住。"""
+    robot = robot_sdk.Robot(robot_sdk.RobotConfig(node_name="ns_probe", node_namespace="robot1"))
+    try:
+        assert robot.config().node_namespace == "robot1"
+    finally:
+        robot.stop()
