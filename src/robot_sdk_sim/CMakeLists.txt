@@ -70,7 +70,7 @@ install(TARGETS joint_trajectory_mock
     DESTINATION lib/${PROJECT_NAME}
 )
 install(DIRECTORY include/ DESTINATION include)
-install(DIRECTORY launch DESTINATION share/${PROJECT_NAME})
+install(DIRECTORY launch rviz DESTINATION share/${PROJECT_NAME})
 
 ament_export_include_directories(include)
 ament_export_dependencies(

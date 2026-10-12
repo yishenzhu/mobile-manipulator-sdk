@@ -1,7 +1,9 @@
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
-from launch.substitutions import LaunchConfiguration
+from launch.conditions import IfCondition
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
+from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description():
@@ -12,6 +14,11 @@ def generate_launch_description():
         [
             DeclareLaunchArgument("namespace", default_value=""),
             DeclareLaunchArgument("use_sim_time", default_value="false"),
+            DeclareLaunchArgument(
+                "rviz",
+                default_value="false",
+                description="顺便起 rviz2（Fixed Frame=map，配置在 rviz/mock.rviz）。需要图形环境。",
+            ),
             Node(
                 package="robot_sdk_sim",
                 executable="mock_robot_node",
@@ -23,6 +30,20 @@ def generate_launch_description():
                         "use_sim_time": LaunchConfiguration("use_sim_time"),
                     }
                 ],
+            ),
+            # rviz2 **不进命名空间**：它要看整张图。跟进去反而订不到 /tf，
+            # 画面上会什么都没有（TF 订阅用的是绝对名）。
+            Node(
+                package="rviz2",
+                executable="rviz2",
+                name="rviz2",
+                output="screen",
+                arguments=[
+                    "-d",
+                    PathJoinSubstitution(
+                        [FindPackageShare("robot_sdk_sim"), "rviz", "mock.rviz"]),
+                ],
+                condition=IfCondition(LaunchConfiguration("rviz")),
             ),
         ]
     )

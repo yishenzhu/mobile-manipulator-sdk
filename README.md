@@ -161,12 +161,18 @@ colcon test-result --verbose
 
 | 想了解 | 看 |
 |---|---|
+| **哪个文件装了什么、谁调用谁**（10 个包的文件地图 + 接线总表 + 找功能索引） | [`docs/file-map.md`](docs/file-map.md)（**想改代码时先看这份**） |
+| **机器人是怎么动起来的：业务流转全图，mock / Gazebo / 真机三条路对照** | [`docs/robot-flows.md`](docs/robot-flows.md)（想懂行为先看这份） |
 | **SDK 怎么被调用、`spin()` 在干什么、和手写 ROS 2 有何不同** | [`docs/sdk-call-flow.md`](docs/sdk-call-flow.md)（偏入门） |
 | mock 的**内部设计**（并发模型、动作骨架、传感器世界） | [`docs/mock-robot-node.md`](docs/mock-robot-node.md) |
+| **怎么看机器人在哪 / 3D 空间；URDF 怎么发布和被谁用** | [`docs/visualization.md`](docs/visualization.md) |
 | 逐次踩坑的历史与推导过程 | [`学习笔记.md`](学习笔记.md) |
 | Python 绑定的边界约定（异常 / GIL） | [`src/robot_sdk_py/README.md`](src/robot_sdk_py/README.md) |
 | Gazebo 那条链路怎么起、已知坑 | [`src/robot_sdk_gazebo/README.md`](src/robot_sdk_gazebo/README.md) |
 | 验收探针怎么跑、为什么老挂住 | [`src/robot_sdk_tests/README.md`](src/robot_sdk_tests/README.md) |
+
+还没建立全局印象时，先看 [`docs/file-map.md`](docs/file-map.md)：它按包列出**每个文件干什么**，
+并把包之间的调用关系画成图。
 
 **建议的读代码顺序**：`robot_sdk_core/include/robot_sdk/config.hpp`（契约是什么）
 → `robot_sdk_sim/src/mock_robot_main.cpp`（几条"车道"）
@@ -198,6 +204,13 @@ ros2 launch robot_sdk_gazebo gazebo.launch.py headless:=true   # 无显示器
 ```
 
 详细的搭配与已知问题见各自的 README。
+
+**想直接看机器人在哪、看 3D 空间**（RViz / Gazebo / 没有图形环境时的办法，以及 URDF 是怎么
+发布和被谁用的）：见 [`docs/visualization.md`](docs/visualization.md)。最快的一条：
+
+```bash
+ros2 launch robot_sdk_sim mock_robot.launch.py rviz:=true    # mock + rviz2（需要图形环境）
+```
 
 ---
 

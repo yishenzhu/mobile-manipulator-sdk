@@ -30,6 +30,10 @@
 
     <test_depend>ament_cmake_gtest</test_depend>
 
+    <!-- 只在 `rviz:=true` 时才起（launch/mock_robot.launch.py）。
+         它是"看"的工具，不是模拟器的运行时依赖 —— 所以放在 exec_depend、不进 depend。 -->
+    <exec_depend>rviz2</exec_depend>
+
     <export>
         <build_type>ament_cmake</build_type>
     </export>

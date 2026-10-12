@@ -3,7 +3,8 @@
 > **面向**：不熟 ROS 2 的人。
 > **本文的代码只表示"流程形状"和"接口长什么样"，不是可运行的完整程序。**
 > 能跑的成品在 `ws/src/robot_sdk_examples/`。
-> **姊妹文档**：`mock-robot-node.md`（讲 mock **内部**怎么设计）。
+> **姊妹文档**：`mock-robot-node.md`（讲 mock **内部**怎么设计）；
+> `robot-flows.md`（端到端业务流转全图 + mock / Gazebo / 真机三条路对照）。
 
 ---
 
