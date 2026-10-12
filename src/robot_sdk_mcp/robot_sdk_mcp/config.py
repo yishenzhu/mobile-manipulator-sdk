@@ -16,6 +16,8 @@ ENV_MOTION_ACTION = "ROBOT_SDK_MOTION_ACTION"
 ENV_POSE_ACTION = "ROBOT_SDK_POSE_ACTION"
 ENV_GLOBAL_FRAME = "ROBOT_SDK_GLOBAL_FRAME"
 ENV_USE_SIM_TIME = "ROBOT_SDK_USE_SIM_TIME"
+ENV_JOINT_NAMES = "ROBOT_SDK_JOINT_NAMES"
+ENV_HOME_POSITIONS = "ROBOT_SDK_HOME_POSITIONS"
 
 
 def build_config() -> robot_sdk.RobotConfig:
@@ -28,7 +30,25 @@ def build_config() -> robot_sdk.RobotConfig:
     set_if_env(config.navigation, "global_frame", ENV_GLOBAL_FRAME)
     set_if_env(config.motion, "action_name", ENV_MOTION_ACTION)
     set_if_env(config.motion, "pose_action_name", ENV_POSE_ACTION)
+    # 具名目标（home）只能代码配置：named_targets 是 map，ROS 参数没有 map 类型。
+    joint_names = env_list(ENV_JOINT_NAMES)
+    if joint_names:
+        config.motion.joint_names = joint_names
+    home = env_floats(ENV_HOME_POSITIONS)
+    if home:
+        config.motion.named_targets = {"home": home}
     return config
+
+
+def env_list(env_name: str) -> list[str]:
+    """逗号分隔 → 列表；未设置返回空。"""
+    raw = os.environ.get(env_name)
+    return [item.strip() for item in raw.split(",") if item.strip()] if raw else []
+
+
+def env_floats(env_name: str) -> list[float]:
+    """逗号分隔 → 浮点列表。"""
+    return [float(item) for item in env_list(env_name)]
 
 
 def set_if_env(section, field: str, env_name: str) -> None:
