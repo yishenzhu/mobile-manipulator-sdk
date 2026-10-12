@@ -113,7 +113,13 @@ class ActionHandle {
     }
 
     auto result_future = client->async_get_result(goal_handle);
-    if (result_future.wait_until(deadline) != std::future_status::ready) {
+    const bool got_result = result_future.wait_until(deadline) == std::future_status::ready;
+    // 结果一旦请求，这个目标就必然走向终态：放掉对 rclcpp_action goal handle 的引用。
+    // ⚠️ 两条出口都要放：GoalHandle 存着反馈回调、回调又捕获了 this ⇒ 不放就成环，
+    //    handle 永不析构，登记册里的 weak_ptr 永不失效 ⇒ 之后 cancelAll 会去取消一个
+    //    早已结束的目标 ⇒ client 抛 "Goal handle is not known to this client"。
+    goal_future_ = {};
+    if (!got_result) {
       client->async_cancel_goal(goal_handle);
       return Error::Timeout("timed out waiting for the action result");
     }

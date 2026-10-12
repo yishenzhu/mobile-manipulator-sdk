@@ -29,3 +29,8 @@ def fail(error: robot_sdk.RobotSdkError) -> dict:
     if code not in KNOWN_CODES:
         return {"ok": False, "code": "INTERNAL", "message": str(error), "data": {}}
     return {"ok": False, "code": code, "message": message, "data": {}}
+
+
+def invalid(message: str) -> dict:
+    """参数不合法：不调 SDK 就能判定，直接返回 envelope。"""
+    return {"ok": False, "code": "INVALID_ARGUMENT", "message": message, "data": {}}

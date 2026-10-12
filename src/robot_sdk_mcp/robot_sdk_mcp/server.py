@@ -23,7 +23,7 @@ async def lifespan(server):
 
 app = FastMCP("robot", lifespan=lifespan)
 
-for tool in (tools.get_status, tools.get_pose, tools.joint_states, tools.scan_summary):
+for tool in tools.TOOLS:
     app.add_tool(tool)
 
 
