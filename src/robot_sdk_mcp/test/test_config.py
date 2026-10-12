@@ -9,6 +9,7 @@ ALL_ENV = (
     config.ENV_POSE_ACTION,
     config.ENV_GLOBAL_FRAME,
     config.ENV_USE_SIM_TIME,
+    config.ENV_POSE_FRAME,
     config.ENV_JOINT_NAMES,
     config.ENV_HOME_POSITIONS,
 )
@@ -44,6 +45,14 @@ def test_joint_names_and_home_target(monkeypatch):
     cfg = config.build_config()
     assert list(cfg.motion.joint_names) == ["shoulder_pan_joint", "elbow_joint", "wrist_joint"]
     assert dict(cfg.motion.named_targets) == {"home": [0.0, 0.1, 0.2]}
+
+
+def test_pose_frame_is_configurable(monkeypatch):
+    clear(monkeypatch)
+    # 真 MoveIt 的模型帧是 URDF 根（base_footprint），不是 SDK 默认的 map
+    monkeypatch.setenv(config.ENV_POSE_FRAME, "base_footprint")
+    cfg = config.build_config()
+    assert cfg.motion.pose_frame == "base_footprint"
 
 
 def test_empty_env_does_not_clobber_default(monkeypatch):

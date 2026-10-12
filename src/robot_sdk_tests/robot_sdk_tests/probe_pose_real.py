@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """验收探针：真栈 —— 真 ros2_control + 真 move_group，验 6 DOF 解得出**带姿态**的目标。
 seed 里腕关节非零 ⇒ 朝向非平凡 ⇒ any_orientation=False 成功即说明 KDL 解得出 6 维位姿。
-只有 4 个 revolute 关节时这条必失败（-27），所以它同时钉住了"腕部那两段还在"。"""
+少一个腕关节就退化成欠自由度、这条必失败（-27），所以它同时钉住了"腕部那两段还在"。"""
 
 import math
 

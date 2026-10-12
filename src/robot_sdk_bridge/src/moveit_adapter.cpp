@@ -94,6 +94,7 @@ class MoveItAdapter : public rclcpp::Node {
         slot_.reserve(); // 占位：下游句柄要等回应回调才到
         // 位姿记下来：反馈和结果里的误差都要它，而 MoveGroup 的回调带不回来。
         target_pose_ = goal->target_pose;
+        target_any_orientation_ = goal->any_orientation;
       }
     }
     if (busy) {
@@ -304,9 +305,11 @@ class MoveItAdapter : public rclcpp::Node {
       //    那要等执行完从 TF 上量 —— 不能拿"规划出来的终点"冒充（那是期望值，不是实测值）。
       //    这里查一次，查不到就留 0 并把话说清。
       geometry_msgs::msg::PoseStamped goal_pose;
+      bool any_orientation = false;
       {
         std::lock_guard<std::mutex> lock(mutex_);
         goal_pose = target_pose_;
+        any_orientation = target_any_orientation_;
       }
       const auto actual = currentEndEffectorPose(goal_pose.header);
       if (!actual.header.frame_id.empty() && actual.pose.orientation.w != 0.0) {
@@ -315,8 +318,14 @@ class MoveItAdapter : public rclcpp::Node {
         result->final_position_error =
             std::sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y) +
                       (a.z - b.z) * (a.z - b.z));
-        result->final_orientation_error = quaternionAngle(
-            actual.pose.orientation, goal_pose.pose.orientation);
+        // ⚠️ 只有客户**真要求了姿态**才算它：any_orientation 时 goal 里那个姿态是客户
+        //    随手填的（SDK 默认单位四元数），拿它当基准会报出一个没人要的数
+        //    （实测 any_orientation=true 会返回 2.77 rad == 实际朝向到单位朝向的夹角）。
+        //    契约是"恒为 0"：不是没测，是本来就没要求。
+        if (!any_orientation) {
+          result->final_orientation_error = quaternionAngle(
+              actual.pose.orientation, goal_pose.pose.orientation);
+        }
       } else if (result->message.empty()) {
         result->message = "到达了，但拿不到末端位姿（TF 上没有 " + end_effector_link_ + "）";
       }
@@ -371,6 +380,9 @@ class MoveItAdapter : public rclcpp::Node {
   std::shared_ptr<MoveGroupGoalHandle> downstream_handle_;
   /// 本目标的位姿 —— 反馈和结果里的误差都要它（MoveGroup 的回调里带不回来）。
   geometry_msgs::msg::PoseStamped target_pose_;
+  /// 客户是否要求姿态。**any_orientation 为真 ⇒ 结果里的姿态误差恒为 0**（契约见
+  /// `MoveToPose.action` 的字段注释：不是"没测"，是本来就没要求）。
+  bool target_any_orientation_{false};
 };
 
 } // namespace robot_sdk::bridge

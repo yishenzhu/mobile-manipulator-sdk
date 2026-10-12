@@ -134,6 +134,8 @@ async def move_eef_to_pose(
 ) -> dict:
     """末端到笛卡尔位姿 (x, y, z, qx, qy, qz, qw)；any_orientation=true 时朝向由规划器挑。
 
+    坐标系由服务器的 ROBOT_SDK_POSE_FRAME 决定（真 MoveIt 要用它的模型帧，如 base_footprint）。
+    返回 data.final_position_error（**米**）与 data.final_orientation_error（**弧度**）。
     走 SDK 的笛卡尔 action（默认 move_to_pose）—— 裸 mock 不提供它，要接了 MoveIt 适配器才有。
     """
     api = robot_of(ctx).motion()

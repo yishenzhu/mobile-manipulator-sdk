@@ -47,6 +47,7 @@ robot:
 | `ROBOT_SDK_NAV_ACTION` | 导航 action 名（接适配器则换 `sdk/navigate_to_pose`） | `navigate_to_pose` |
 | `ROBOT_SDK_MOTION_ACTION` | 关节 action 名 | `move_to_joint_positions` |
 | `ROBOT_SDK_POSE_ACTION` | 笛卡尔 action 名 | `move_to_pose` |
+| `ROBOT_SDK_POSE_FRAME` | 笛卡尔目标的坐标系（真 MoveIt 的模型帧是 `base_footprint`） | `map` |
 | `ROBOT_SDK_GLOBAL_FRAME` | 全局坐标系 | `map` |
 | `ROBOT_SDK_USE_SIM_TIME` | 用仿真时间 | `false` |
 | `ROBOT_SDK_JOINT_NAMES` | 逗号分隔；具名目标要靠它把位置对应到关节 | 空 |

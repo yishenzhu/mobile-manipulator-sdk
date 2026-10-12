@@ -28,9 +28,8 @@
   <xacro:property name="upper_arm_length" value="0.22"/>
   <xacro:property name="forearm_length" value="0.20"/>
   <xacro:property name="wrist_length" value="0.06"/>
-  <!-- 腕部后两个自由度各占一小段。加它们是为了把 arm 凑够 **6 个 revolute**：
-       只有 4 个的时候 KDL 解不出 6 维位姿（欠自由度），只能靠 position_only_ik
-       放弃姿态、只保位置。 -->
+  <!-- 腕部后两个自由度各占一小段。arm 组靠它们凑够 **6 个 revolute** ——
+       KDL 才能解完整 6 维位姿（少一个就退化成欠自由度，解不出带姿态的目标）。 -->
   <xacro:property name="wrist_pitch_length" value="0.03"/>
   <xacro:property name="wrist_roll_length" value="0.02"/>
   <xacro:property name="arm_radius" value="0.035"/>

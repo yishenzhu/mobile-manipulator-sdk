@@ -16,6 +16,7 @@ ENV_MOTION_ACTION = "ROBOT_SDK_MOTION_ACTION"
 ENV_POSE_ACTION = "ROBOT_SDK_POSE_ACTION"
 ENV_GLOBAL_FRAME = "ROBOT_SDK_GLOBAL_FRAME"
 ENV_USE_SIM_TIME = "ROBOT_SDK_USE_SIM_TIME"
+ENV_POSE_FRAME = "ROBOT_SDK_POSE_FRAME"
 ENV_JOINT_NAMES = "ROBOT_SDK_JOINT_NAMES"
 ENV_HOME_POSITIONS = "ROBOT_SDK_HOME_POSITIONS"
 
@@ -30,6 +31,9 @@ def build_config() -> robot_sdk.RobotConfig:
     set_if_env(config.navigation, "global_frame", ENV_GLOBAL_FRAME)
     set_if_env(config.motion, "action_name", ENV_MOTION_ACTION)
     set_if_env(config.motion, "pose_action_name", ENV_POSE_ACTION)
+    # ⚠️ 笛卡尔目标的坐标系：SDK 默认 `map`，而真 MoveIt 的模型帧是 URDF 根（本项目是
+    #    `base_footprint`）⇒ 不设的话 MoveIt 解析不了约束帧，目标直接失败。
+    set_if_env(config.motion, "pose_frame", ENV_POSE_FRAME)
     # 具名目标（home）只能代码配置：named_targets 是 map，ROS 参数没有 map 类型。
     joint_names = env_list(ENV_JOINT_NAMES)
     if joint_names:

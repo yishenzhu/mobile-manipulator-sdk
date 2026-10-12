@@ -112,9 +112,8 @@ pytest src/robot_sdk_tests/test/test_real_stack.py -s
 
 **它验什么**：拿 `/compute_fk` 算出的、**姿态非平凡**的可达位姿当目标（seed 里三个腕关节
 都非零），用 `any_orientation=False`（适配器会**真填**姿态约束）发下去，断言 `success`
-且姿态误差在容忍带内。⇒ 这实际是在钉「`arm` 组有 6 个 revolute 关节、KDL 解得出完整
-6 维位姿」。**只有 4 个关节时这条必失败**（回 `GOAL_STATE_INVALID` -27），
-当时只能靠 `position_only_ik` 放弃姿态。
+且姿态误差在容忍带内。⇒ 这实际是在钉「`arm` 组是 6 个 revolute 关节、KDL 解得出完整
+6 维位姿」：少一个腕关节就会退化成欠自由度，这条必然失败（回 `GOAL_STATE_INVALID` -27）。
 
 **和替身那条的分工**（两条都要有）：
 

@@ -3,9 +3,9 @@
 #    三处对不上 MoveIt 会直接说"没有这个组"。
 arm:
   kinematics_solver: kdl_kinematics_plugin/KDLKinematicsPlugin
-  # ⚠️ 6 个 revolute 关节（pan/lift/elbow + Z-Y-Z 球形腕），KDL 能解完整 6 维位姿。
-  #    只有 4 个关节时必须开 true（欠自由度会让 KDL"报成功却解不出" ⇒ -27），代价是放弃姿态；
-  #    现在关掉 ⇒ any_orientation=false 的目标要求姿态也解得出。
+  # ⚠️ arm 组是 6 个 revolute（pan/lift/elbow + Z-Y-Z 球形腕）⇒ KDL 能解完整 6 维位姿。
+  #    所以这里**必须**是 false：置 true 会白白放弃姿态，any_orientation=false 的目标
+  #    就永远解不出朝向。
   position_only_ik: false
   kinematics_solver_search_resolution: 0.005
   kinematics_solver_timeout: 0.05
