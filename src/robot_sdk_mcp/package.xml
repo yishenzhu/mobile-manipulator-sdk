@@ -13,6 +13,10 @@
   <!-- robot_sdk 模块，由 source install/setup.bash 进入 PYTHONPATH。 -->
   <exec_depend>robot_sdk_py</exec_depend>
 
+  <!-- 单测只覆盖 errors / config（纯翻译与配置），不 import mcp，所以不需要 venv。 -->
+  <test_depend>python3-pytest</test_depend>
+  <test_depend>robot_sdk_core</test_depend>
+
   <export>
     <build_type>ament_python</build_type>
   </export>

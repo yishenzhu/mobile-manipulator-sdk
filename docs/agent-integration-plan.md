@@ -153,12 +153,14 @@ async def lifespan(server):
 
 ```yaml
 robot:
-  command: bash
-  args: ["-lc", "source /opt/ros/jazzy/setup.bash && source /home/dfg/robot/ws/install/setup.bash && exec ros2 run robot_sdk_mcp robot_sdk_mcp_server"]
+  command: /home/dfg/robot/ws/src/robot_sdk_mcp/scripts/run_server.sh   # 直接跑脚本，见下
   env:
     ROS_DOMAIN_ID: "42"          # 见 §5.5，必须与 mock / Nav2 用同一个值
   enabled: true
 ```
+
+> ⚠️ **不要**写成 `command: bash` + `args: ["-lc", ...]`：登录 shell 会 source profile，banner 打到 stdout 就**污染 MCP 的 stdio 协议流**。脚本自己有 shebang。
+> `env` 是**合并**进默认环境（`{**default, **server.env}`），不会把 `PATH` 冲掉 —— 但默认环境只带一份安全子集，所以 `ROS_DOMAIN_ID` 必须显式写在这里。
 
 ### 4.2 `conf.yaml`（追加）
 
@@ -171,7 +173,7 @@ tool:
       - [allow, "mcp_robot_scan_summary"]
       - [allow, "mcp_robot_joint_states"]
       - [allow, "mcp_robot_cancel"]            # 急停必须永远可用（还无锁，见 §6）
-      - [deny,  "mcp_robot_navigate_to(avoid_obstacles=false)"]   # 危险参数直接拒
+      - [deny,  "mcp_robot_navigate_to(avoid_obstacles=False)"]   # 危险参数直接拒
       - [ask,   "mcp_robot_*"]                 # 其余运动类默认人工确认
   timeout:
     overrides:
@@ -261,6 +263,8 @@ async def navigate_to(ctx, x, y, yaw=0.0, avoid_obstacles=True, timeout_s=60.0) 
 - **【量】** `NavigationConfig.action_name` / `MotionConfig.action_name` / `pose_action_name` 都是可写的。
 - **【量】** mock 用 `navigate_to_pose` / `move_to_joint_positions` / `move_to_pose`；适配器占带前缀的 `sdk/navigate_to_pose` 等（同名但类型不同的两个 action server 无法共存）。
 - ⇒ 选哪个后端是 **bridge（装配根）** 的事：server 读环境变量 `ROBOT_SDK_NAV_ACTION` / `ROBOT_SDK_MOTION_ACTION` / `ROBOT_SDK_POSE_ACTION` 设好即可，**工具 schema 与 Agent 一字不改**。这正是 SDK 接口解耦（对外只依赖 `robot_sdk_interfaces`）在集成层的兑现。
+- **【量】已端到端验证**（R9）：整栈 `ros2 launch robot_sdk_nav2 navigation.launch.py`（map_server + mock + nav2_adapter + 4 个 Nav2 节点，**不含 Gazebo**）起来后，**只把 mcp.yaml 里 `ROBOT_SDK_NAV_ACTION` 改成 `sdk/navigate_to_pose`**，同一个 `robot_operator`、同一句指令、技能一字不动 ⇒ Nav2 侧留下实据：`bt_navigator: Begin navigating from (0.00, 0.00) to (1.50, 0.50)` → `controller_server: Received a goal` → `Passing new path to controller` ×4 → `Reached the goal!`。末距离误差 **0.171 m**（裸 mock 直连时是 0.041 m —— 真 Nav2 有自己的控制容差）。
+- ⚠️ **【量】与 README 说法不一致的一处**：两栈并存时 `ros2 action list -t` 显示 `/navigate_to_pose` 上**同时挂着两个类型**（`nav2_msgs` 与 `robot_sdk_interfaces`）—— 和"同名不同型无法共存"的说法对不上，**值得单独复核**。无论结论如何，适配器用 `sdk/` 前缀都是必要的（否则客户端按名取会撞类型）。
 
 ### 5.5 用 `ROS_DOMAIN_ID` 隔离 ROS 图
 
@@ -330,14 +334,16 @@ async def navigate_to(ctx, x, y, yaw=0.0, avoid_obstacles=True, timeout_s=60.0) 
 
 ## 8. 里程碑
 
-| 阶段 | 内容 | 完成判据 |
+| 阶段 | 内容 | 状态 |
 |---|---|---|
-| **P1** | `robot_sdk_mcp` 包骨架 + 11 个 async 工具 + envelope + launcher/venv | 单独起能 `list_tools`；对 mock 手调每个工具都返回合理结果 |
-| **P2** | Walle 接入：`mcp.yaml` + `robot_operator` + `robot-operating` 技能 + 审批/超时 | Agent 能列出 `mcp_robot_*` 并被审批/超时正确管辖 |
-| **P3** | mock 端到端 + 并发用例 + `cancel` 用例 | §7 的 3/4/5 全过 |
-| **P4** | 接 Nav2 + MoveIt 整栈 | §7 的 6 过（换后端不改 Agent） |
-| **P5** | 可观测 + 评测 | OTel span 串起 `tool.execute → SDK action`；`eval/tasks/` 加一个 robot 域任务进回归 |
-| **P6** | 文档与测试收尾 | SDK 侧 README、Walle 侧技能定稿；bridge 单测 |
+| **P1** | `robot_sdk_mcp` 包骨架 + 11 个 async 工具 + envelope + launcher/venv | ✅ 完成（venv 装 `mcp 1.30.0`） |
+| **P2** | Walle 接入：`mcp.yaml` + `robot_operator` + `robot-operating` 技能 + 审批/超时 | ✅ 完成 |
+| **P3** | mock 端到端 + 急停用例 | ✅ 完成（真 CLI 通道：`navigate_to` 审批 1 次；`cancel` 0 次） |
+| **P4** | 接 Nav2 整栈（**换后端不改 Agent**） | ✅ 完成（Nav2 侧留下 `Reached the goal!`；只改了 mcp.yaml 一行） |
+| **P5** | 可观测 + 评测 | ⏭️ **跳过**（本机无 docker，不做） |
+| **P6** | 文档与测试收尾 | ✅ 完成（`robot_sdk_mcp` 单测 9 项；两侧 README / 本文） |
+
+**当前测试基线**：SDK 侧 `colcon test` **88 项 0 失败**；`robot_sdk_mcp` 单测 **9 项 0 失败**。另有一个在 R5c 顺手修掉的 SDK 侧真 bug（见 §9）。
 
 ---
 

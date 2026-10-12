@@ -30,11 +30,14 @@ bash src/robot_sdk_mcp/scripts/run_server.sh                    # 单独起（st
 
 ```yaml
 robot:
-  command: bash
-  args: ["-lc", "/home/dfg/robot/ws/src/robot_sdk_mcp/scripts/run_server.sh"]
-  env: { ROS_DOMAIN_ID: "42" }        # 必须与 mock / Nav2 用同一个值
+  command: /home/dfg/robot/ws/src/robot_sdk_mcp/scripts/run_server.sh   # 直接跑脚本
+  env: { ROS_DOMAIN_ID: "42" }   # 必须与 mock / Nav2 用同一个值
   enabled: true
 ```
+
+> ⚠️ 不要写成 `command: bash` + `args: ["-lc", ...]`：登录 shell 会 source profile，
+> banner 打到 stdout 就污染 MCP 的 stdio 协议流。脚本自己有 shebang。
+> （`env` 是**合并**进默认环境，不会把 PATH 等冲掉 —— 见 mcp 的 `stdio_client`。）
 
 ## 环境变量
 

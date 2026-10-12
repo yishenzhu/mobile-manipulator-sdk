@@ -4,9 +4,11 @@
 # ⚠️ 不能用 `ros2 run robot_sdk_mcp robot_sdk_mcp_server`：那个入口脚本的 shebang 是
 #    **系统 python3**，那里没有 mcp。所以这里显式用 venv 的 python 跑模块。
 #
-# 用法（Walle 的 .agent/mcp.yaml）：
-#   command: bash
-#   args: ["-lc", "<这个脚本的绝对路径>"]
+# 用法（Walle 的 .agent/mcp.yaml）：把本脚本绝对路径**直接当 command**：
+#   robot:
+#     command: /abs/path/scripts/run_server.sh
+# ⚠️ 不要套 `bash -lc`：登录 shell 会 source profile，万一有 banner 打到 stdout
+#    就会污染 MCP 的 stdio 协议流。脚本自己有 shebang。
 
 # ⚠️ 只用 -e pipefail，**不能加 -u**：ROS 的 setup.bash 会引用未定义变量
 #   （AMENT_TRACE_SETUP_FILES），nounset 会让它当场报错。

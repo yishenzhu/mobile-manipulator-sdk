@@ -12,6 +12,7 @@ setup(
     ],
     # mcp 钉 <2，与 Walle 同版本；v1/v2 对同步工具的处理相反。
     install_requires=["setuptools", "mcp>=1.0,<2"],
+    tests_require=["pytest"],
     zip_safe=True,
     maintainer="Robot SDK",
     maintainer_email="3464428214@qq.com",
