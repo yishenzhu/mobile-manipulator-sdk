@@ -1,12 +1,30 @@
 """MCP server 入口：FastMCP 装配 + stdio 传输。
 
-工具体一律 async + anyio.to_thread.run_sync：SDK 的阻塞调用必须离开事件循环线程。
+工具体一律 async + asyncio.to_thread：SDK 的阻塞调用必须离开事件循环线程。
 本包钉 mcp<2，而 v1 里同步函数直接在事件循环上执行，会卡死 server。
 """
 
+from contextlib import asynccontextmanager
+
 from mcp.server.fastmcp import FastMCP
 
-app = FastMCP("robot")
+from . import connection, tools
+
+
+@asynccontextmanager
+async def lifespan(server):
+    """建连接、起 spin；进程退出时停 —— Robot 的生命周期就是这个 server 的。"""
+    connection.start()
+    try:
+        yield
+    finally:
+        connection.stop()
+
+
+app = FastMCP("robot", lifespan=lifespan)
+
+for tool in (tools.get_status, tools.get_pose, tools.joint_states, tools.scan_summary):
+    app.add_tool(tool)
 
 
 def main() -> None:
