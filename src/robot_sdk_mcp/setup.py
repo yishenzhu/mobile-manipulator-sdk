@@ -10,9 +10,7 @@ setup(
         ("share/ament_index/resource_index/packages", ["resource/" + package_name]),
         ("share/" + package_name, ["package.xml"]),
     ],
-    # ⚠️ mcp 钉 <2：与 Walle 同一个大版本（Walle 的 pyproject 也锁 <2）。
-    #    不是洁癖 —— v1 与 v2 对"同步工具"的处理是相反的，工具写法要与之匹配。
-    #    见 docs/agent-integration-plan.md §5.3。
+    # mcp 钉 <2，与 Walle 同版本；v1/v2 对同步工具的处理相反。
     install_requires=["setuptools", "mcp>=1.0,<2"],
     zip_safe=True,
     maintainer="Robot SDK",
