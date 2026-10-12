@@ -126,7 +126,9 @@ src/robot_sdk_mcp/
 └── README.md
 ```
 
-暴露 console_script，既可用 `ros2 run robot_sdk_mcp robot_sdk_mcp_server` 单独起（调试），也可由 `run_server.sh` 给 Walle 拉起。
+⚠️ **不能**用 `ros2 run robot_sdk_mcp robot_sdk_mcp_server`：那个入口脚本的 shebang 是**系统 python3**，那里没有 `mcp`。启动一律走 `scripts/run_server.sh`（它用 venv 的 python 跑 `-m robot_sdk_mcp.server`）。
+
+**【量】Robot 由 `lifespan` 建、退出时停；工具经 Context 注入取它**（`robot_of(ctx)` = `ctx.request_context.lifespan_context["robot"]`）⇒ 没有全局变量，也没有"未启动"的运行时分支。`ctx` **不会**出现在工具 schema 里（v1 按真类型识别并把它从 schema 剔除）。
 
 **lifespan 骨架**（【推】，落地按 mcp v1 的 `FastMCP` API 写）：
 
@@ -233,18 +235,24 @@ skills: ["robot-operating"]
 - **【量】mcp v1**（Walle 所在版本）`FuncMetadata.call_fn_with_arg_validation`：同步函数**直接在事件循环线程上调用**，没有任何线程池。
 - **【量】mcp v2** 则是 `await anyio.to_thread.run_sync(...)`，同步函数被自动 offload。
 - ⇒ **"写同步交给框架"只对 v2 成立**；v1 世界里同步工具会把事件循环**钉死几十秒**（server 连 stdin 都读不了，还会撞客户端超时）。
-- **正确形态**（v1/v2 都对）：`async def` + 显式 `await anyio.to_thread.run_sync(...)`：
+- **正确形态**：`async def` + 显式 `await asyncio.to_thread(...)`：
 
 ```python
-async def navigate_to(x, y, yaw=0.0, avoid_obstacles=True, timeout_s=60.0) -> dict:
+async def navigate_to(ctx, x, y, yaw=0.0, avoid_obstacles=True, timeout_s=60.0) -> dict:
+    api = robot_of(ctx).navigation()
+
     def _run():
         goal = robot_sdk.NavigationGoal()
         goal.target = robot_sdk.Pose2D(x, y, yaw)
         goal.avoid_obstacles = avoid_obstacles
         goal.timeout_s = timeout_s
-        return app_robot().navigation().go_to(goal)
-    return envelope(await anyio.to_thread.run_sync(_run))
+        return api.go_to(goal)
+
+    return envelope(await asyncio.to_thread(_run))
 ```
+
+- **【量】用标准库 `asyncio.to_thread` 而不是 `anyio.to_thread.run_sync`**：语义等价、少一个直接依赖。
+- ⚠️ **【量】`tools.py` 不能写 `from __future__ import annotations`**：v1 用 `issubclass(param.annotation, Context)` 按**真类型**认 `ctx`（`tools/base.py:59`，且 `inspect.signature` 没有 `eval_str`），注解一变字符串就 `TypeError` —— 当场起不来。
 
 > **本质**：`async` 不是目的；要求只有一条 —— **阻塞的 SDK 调用不能跑在事件循环线程上**。v1 逼我们自己做 offload，所以工具体必须 `async`。
 
@@ -264,6 +272,12 @@ async def navigate_to(x, y, yaw=0.0, avoid_obstacles=True, timeout_s=60.0) -> di
 
 - **【量】** 后端（mock）自己就是"**忙时原子拒收**"：`handleGoal` 在 `mutex_` 里 test-and-set，忙则 `return GoalResponse::REJECT`（`mock_robot_node.cpp` 导航/运动、`joint_trajectory_mock.cpp`、`move_group_mock.cpp` 同款）。
 - ⇒ bridge **不加锁、不排队**。理由与安全论证见 §6。
+
+### 5.7 启动时要等动作服务端 —— 否则**第一个目标会丢**
+
+- **【量】** rclcpp_action **不会替你等**服务端被发现。不等的话第一个目标就发在发现完成之前，然后一直等不到受理：实测 `home()` 稳定 `TIMEOUT: timed out waiting for the action goal to be accepted`（30 s），而紧接着**同一个调用**成功。
+- 前几轮的用例没暴露，是因为它们开局先调了 `joint_states()` / `get_status()`，等于顺手等了约一秒。
+- ⇒ `lifespan` 起完 spin 线程后，`navigation().server_available(5s)` + `motion().server_available(5s)`。
 
 ---
 
@@ -329,8 +343,9 @@ async def navigate_to(x, y, yaw=0.0, avoid_obstacles=True, timeout_s=60.0) -> di
 
 ## 9. 风险与未决
 
-- **【推】协议版本混搭**：server 侧建议同样钉 `mcp>=1.0,<2`（与 Walle 同世界，少一个变量），不依赖 v2 的自动 offload。跨大版本是否兼容未验证。
+- **mcp 版本混搭**：server 侧已钉 `mcp>=1.0,<2`（`setup.py` 的 `install_requires` + venv 里实际装的 1.30.0），与 Walle 同大版本 ⇒ 不依赖 v2 的自动 offload。**跨大版本混搭仍未验证**。
 - **【推】并发进 SDK 的额外安全**：§5.6 说后端能拒收，但"两个来自不同 server 实例 / 有人手动发"的情况超出 bridge 管辖，仍落到后端。**未压测**。
-- **【推】`nearest_obstacle_distance` 无回波返回 `inf`**：翻译时要处理成可读值或明确字段，别让模型看到 `Infinity`。
-- **未决**：地图语义（"客厅"→坐标）不在第一版；`TfManager` 未绑定到 Python（SDK 的 `tf()` 没暴露），若需要姿态查询要单独加绑定。
+- **`nearest_obstacle_distance` 的 `inf`**：**已处理** —— `scan_summary` 映射成 `nearest_m=null`，不让模型看到 `Infinity`。
+- **【量】SDK 侧顺手修掉的一个真 bug（R5c）**：`ActionHandle` 与 rclcpp_action 的 GoalHandle 构成**引用环**（反馈回调捕获 `[handle]`，而 GoalHandle 又被 `goal_future_` 持有）⇒ 句柄永不析构、`active_handles_` 里的 weak_ptr 永不失效 ⇒ `cancelAll()` 拿着一个**早已结束**的目标去取消，client 抛 `Goal handle is not known to this client`。修法极小：`wait()` 在**请求过结果的两条出口**上都 `goal_future_ = {}`（对应 ROS 收到结果就 erase 自己的登记）。改前三种场景两种会抛、改后全不抛；`colcon test` 88 tests / 0 failures（C++ 改动共 7 增 1 删，一个文件）。
+- **未决**：地图语义（"客厅"→坐标）不在第一版；`TransformManager` 未绑定到 Python（SDK 的 `tf()` 没暴露），若需要姿态查询要单独加绑定。
 - **Walle 侧无源码改动**：所有接入都在 `.agent/` 与 `conf.yaml`。若日后要更强的机器人语义（如自动重规划），再考虑加 Walle 扩展（`.agent/extensions/`）。
