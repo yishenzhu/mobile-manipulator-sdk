@@ -1,0 +1,17 @@
+# 证据：TSan 阳性对照的报告（有竞争那一版；截前 14 行）
+# 看点：Read/Write 两侧各自调用栈 + Location is global 'race_var' + 末尾 reported 1 warnings。
+#
+==================
+WARNING: ThreadSanitizer: data race (pid=94789)
+  Read of size 4 at 0x55555555806c by thread T2:
+    #0 bump_racy() /tmp/commandcode-1000/-home-dfg/b0a1c490-c9f5-4d8f-9df8-ea7bc67dea46/scratchpad/tsan_demo.cpp:9 (tsan_demo+0x13c3) (BuildId: bfc7b9a18ab4e314ac0253653e755d4f3032ecd9)
+    #1 void std::__invoke_impl<void, void (*)()>(std::__invoke_other, void (*&&)()) /usr/include/c++/13/bits/invoke.h:61 (tsan_demo+0x1613) (BuildId: bfc7b9a18ab4e314ac0253653e755d4f3032ecd9)
+    #2 std::__invoke_result<void (*)()>::type std::__invoke<void (*)()>(void (*&&)()) /usr/include/c++/13/bits/invoke.h:96 (tsan_demo+0x1613)
+    #3 void std::thread::_Invoker<std::tuple<void (*)()> >::_M_invoke<0ul>(std::_Index_tuple<0ul>) /usr/include/c++/13/bits/std_thread.h:292 (tsan_demo+0x1613)
+    #4 std::thread::_Invoker<std::tuple<void (*)()> >::operator()() /usr/include/c++/13/bits/std_thread.h:299 (tsan_demo+0x1613)
+    #5 std::thread::_State_impl<std::thread::_Invoker<std::tuple<void (*)()> > >::_M_run() /usr/include/c++/13/bits/std_thread.h:244 (tsan_demo+0x1613)
+    #6 <null> <null> (libstdc++.so.6+0xecdb3) (BuildId: 753c6c8608b61d4e67be8f0c890e03e0aa046b8b)
+
+  Previous write of size 4 at 0x55555555806c by thread T1:
+    #0 bump_racy() /tmp/commandcode-1000/-home-dfg/b0a1c490-c9f5-4d8f-9df8-ea7bc67dea46/scratchpad/tsan_demo.cpp:9 (tsan_demo+0x13e7) (BuildId: bfc7b9a18ab4e314ac0253653e755d4f3032ecd9)
+    #1 void std::__invoke_impl<void, void (*)()>(std::__invoke_other, void (*&&)()) /usr/include/c++/13/bits/invoke.h:61 (tsan_demo+0x1613) (BuildId: bfc7b9a18ab4e314ac0253653e755d4f3032ecd9)

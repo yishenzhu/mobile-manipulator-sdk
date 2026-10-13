@@ -1,0 +1,69 @@
+name: ci
+
+# 门禁只有一条：**能干净地构建 + 全量 colcon test 绿**。
+#   - Gazebo 那条**故意不在 colcon test 里**（要 GPU/渲染组、又慢又抖，见 README），CI 也不跑它
+#   - Nav2 整栈与真栈（ros2_control + move_group）**在**里面 —— 依赖由 rosdep 一次装齐
+#
+# 还没做的（见 README 的"改进方向"）：
+#   1. lint 未进门禁 —— 仓库目前没配 ament_lint/.clang-format，先让测试这条真跑起来
+#   2. 没做依赖缓存 —— rosdep 每次会重拉 MoveIt/Nav2，慢；可换 ros-tooling/setup-ros
+#   3. 没做版本/CHANGELOG（tag + 语义化版本）
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+env:
+  # 固定域 + 限本机：runner 上的 DDS 组播不稳，这样行为才可复现。
+  ROS_DOMAIN_ID: "42"
+  ROS_LOCALHOST_ONLY: "1"
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+    container: ros:jazzy
+    timeout-minutes: 60
+    steps:
+      # 容器里 actions/checkout 自己要用 git。ros:jazzy 一般不缺，但缺了就是
+      # "第一步就红"、且报错看不出来 —— 三行兜底比事后排查便宜。
+      - name: 确保 git 可用
+        run: command -v git >/dev/null || (apt-get update && apt-get install -y --no-install-recommends git)
+
+      - uses: actions/checkout@v4
+
+      - name: 装依赖（rosdep）
+        run: |
+          rosdep init || true          # 镜像里可能已经 init 过
+          rosdep update
+          rosdep install --from-paths src --ignore-src -r -y
+
+      - name: 构建
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          # console_cohesion：一个包的输出聚在一起，日志好读
+          colcon build --symlink-install --event-handlers console_cohesion+
+
+      - name: 测试
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          source install/setup.bash
+          # ⚠️ run: 默认是 `bash -e pipefail` —— 直接写 `colcon test` 的话，它一失败就
+          #    跳过下面的 test-result，而那正是最需要的逐条明细。所以先接住返回值。
+          # ⚠️ 单 worker：Nav2 整栈 + 真栈（ros2_control + move_group）同时跑会互相挤，
+          #    而几条探针是按时序判定的（真栈一条就要 ~30 s）。慢一点，但结论可信。
+          colcon test --parallel-workers 1 && rc=0 || rc=$?
+          colcon test-result --verbose || true
+          exit $rc
+
+      # 失败必须留证据：colcon 的原始日志 + 每个包的 test_results。
+      # 没有它，CI 红了只能看到一句摘要，还得本地复现才知道是谁挂的。
+      - name: 失败时上传日志
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: colcon-logs
+          if-no-files-found: ignore
+          path: |
+            log/
+            build/**/test_results/

@@ -1,0 +1,51 @@
+# 证据：四个示例在 TSan 下跑完的输出（全文，未裁剪）
+# 看点：每份里 ThreadSanitizer 行数 = 0 —— 只有程序自己的正常输出。
+#
+# == tsan_hello.log（9 行，ThreadSanitizer 行=0）==
+=== Robot SDK hello ===
+状态  : state=1  电量=21.0%  充电中=0
+健康  : 1
+服务  : 已运行 356.1 秒
+激光  : 360 条射线，正前方最近障碍 4.90 m
+IMU   : 角速度 z = 0.000 rad/s
+相机  : 深度图 64x48 (32FC1)
+相机  : 点云 64x48
+位姿  : x=0.00  y=0.00  yaw=0.00
+#
+# == tsan_demo_navigation.log（10 行，ThreadSanitizer 行=0）==
+导航动作名: navigate_to_pose
+去 (2.0, 1.0) ...
+  反馈 #1   距目标 2.19 m  预计 4.4 s  状态 navigating
+  反馈 #10  距目标 1.74 m  预计 3.5 s  状态 navigating
+  反馈 #20  距目标 1.24 m  预计 2.5 s  状态 navigating
+  反馈 #30  距目标 0.74 m  预计 1.5 s  状态 navigating
+  反馈 #40  距目标 0.24 m  预计 0.5 s  状态 navigating
+结果  : success=1  末距 0.046 m  'reached target'
+回原点（阻塞调用）...
+结果  : success=1  末距 0.046 m  'reached target'
+#
+# == tsan_demo_motion.log（7 行，ThreadSanitizer 行=0）==
+运动动作名: move_to_joint_positions
+机器人有 7 个关节: shoulder_pan_joint shoulder_lift_joint elbow_joint wrist_joint wrist_pitch_joint wrist_roll_joint gripper_joint
+让 'shoulder_pan_joint' 从 0.00 转到 0.30 ...
+  反馈 #1   完成度 2.0%
+结果  : success=1  末误差 0.0078  'reached target'
+张开夹爪（阻塞调用）...
+结果  : success=1  末误差 0.0100  'reached target'
+#
+# == tsan_demo_manipulation.log（15 行，ThreadSanitizer 行=0）==
+让手臂走到 'ready' 位姿...
+  反馈: 10%
+  反馈: 20%
+  反馈: 30%
+  反馈: 40%
+  反馈: 50%
+  反馈: 60%
+  反馈: 70%
+  反馈: 80%
+  反馈: 90%
+手臂  : success=1  末误差 0.0000  'reached target'
+夹爪  : 张开 success=1  'reached target'
+夹爪  : 闭合 success=1  'reached target'
+手臂  : home success=1
+手臂  : 不存在的名字按预期被拒 -> INVALID_ARGUMENT: unknown named target 'does_not_exist'

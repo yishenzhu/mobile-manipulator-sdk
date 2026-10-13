@@ -1,0 +1,5 @@
+# 证据：Ubuntu 24.04 上 TSan 起不来的原始报错（未裁剪）
+# 来源：tsan_nav.log（80 字节）；直接跑 TSan 构建的 demo_navigation 得到。
+# 对策：setarch $(uname -m) -R <exe> —— 只对该进程关 ASLR，不改系统参数。
+#
+FATAL: ThreadSanitizer: unexpected memory mapping 0x5f8e864eb000-0x5f8e8652e000

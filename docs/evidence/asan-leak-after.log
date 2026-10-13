@@ -1,0 +1,14 @@
+# 证据：LSan 报告（修复【后】）—— 全文照抄，未裁剪
+# 来源：asan_fix.log（512 字节）；同一构建、同一命令，只把那一行恢复回来。
+# 看点：**没有任何 sanitizer 输出**，只剩示例的正常输出。
+#
+导航动作名: navigate_to_pose
+去 (2.0, 1.0) ...
+  反馈 #1   距目标 2.19 m  预计 4.4 s  状态 navigating
+  反馈 #10  距目标 1.74 m  预计 3.5 s  状态 navigating
+  反馈 #20  距目标 1.24 m  预计 2.5 s  状态 navigating
+  反馈 #30  距目标 0.74 m  预计 1.5 s  状态 navigating
+  反馈 #40  距目标 0.24 m  预计 0.5 s  状态 navigating
+结果  : success=1  末距 0.046 m  'reached target'
+回原点（阻塞调用）...
+结果  : success=1  末距 0.046 m  'reached target'

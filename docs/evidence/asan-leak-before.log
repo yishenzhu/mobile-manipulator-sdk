@@ -1,0 +1,134 @@
+# 证据：LSan 报告（修复【前】）
+#
+# 来源：asan_nofix.log（原始 95766 字节 / 305 行）
+# 产生方式：把 action_handle.hpp 里 `goal_future_ = {};` 那一行注释掉，重建后跑
+#           demo_navigation（发 2 个目标）对着普通 mock。原始命令见
+#           docs/action-handle-lifetime.md §9。
+#
+# 裁剪说明：本文件只保留每条泄漏的**头部** + **分配点/我方/ROS 帧**（每条至多 6 帧），
+#           共省略 170 行 asan/libc 内部帧、BuildId 与超长模板名。
+#           数字（条数、字节数、SUMMARY）一字未改。
+
+==76545==ERROR: LeakSanitizer: detected memory leaks
+Indirect leak of 400 byte(s) in 2 object(s) allocated from:
+    #0 in operator new(unsigned long) ../../../../src/libsanitizer/asan/asan_new_delete.cpp:95
+    #1 in rclcpp_action::Client<robot_sdk_interfaces::action::NavigateToPose>::async_send_goal(robot_sdk_interfaces::action::Na …
+    #5 in rclcpp_action::ClientBase::handle_goal_response(rmw_request_id_s const&, std::shared_ptr<void>) (<ROS>/librclcpp_acti …
+    #6 in rclcpp_action::ClientBase::execute(std::shared_ptr<void> const&) (<ROS>/librclcpp_action.so+0x17d98)
+    #7 in rclcpp::Executor::execute_any_executable(rclcpp::AnyExecutable&) (<ROS>/librclcpp.so+0x11789a)
+    #8 in rclcpp::executors::MultiThreadedExecutor::run(unsigned long) (<ROS>/librclcpp.so+0x141d36)
+
+Indirect leak of 272 byte(s) in 1 object(s) allocated from:
+    #0 in operator new(unsigned long) ../../../../src/libsanitizer/asan/asan_new_delete.cpp:95
+    #1 in rclcpp::node_interfaces::NodeBase::create_callback_group(rclcpp::CallbackGroupType, bool) (<ROS>/librclcpp.so+0x15960 …
+    #2 in rclcpp::Node::create_callback_group(rclcpp::CallbackGroupType, bool) (<ROS>/librclcpp.so+0x15618b)
+    #3 in robot_sdk::RobotRuntime::setup() (install/robot_sdk_core/lib/librobot_sdk_core.so+0xc728e1)
+    #4 in robot_sdk::RobotRuntime::RobotRuntime(robot_sdk::RobotConfig const&) (install/robot_sdk_core/lib/librobot_sdk_core.so …
+    #11 in robot_sdk::Robot::Robot(robot_sdk::RobotConfig const&) (install/robot_sdk_core/lib/librobot_sdk_core.so+0xebd0a2)
+
+Indirect leak of 128 byte(s) in 2 object(s) allocated from:
+    #0 in operator new(unsigned long) ../../../../src/libsanitizer/asan/asan_new_delete.cpp:95
+    #2 in rclcpp_action::ClientGoalHandle<robot_sdk_interfaces::action::NavigateToPose>::ClientGoalHandle(action_msgs::msg::Goa …
+    #3 in rclcpp_action::Client<robot_sdk_interfaces::action::NavigateToPose>::async_send_goal(robot_sdk_interfaces::action::Na …
+    #7 in rclcpp_action::ClientBase::handle_goal_response(rmw_request_id_s const&, std::shared_ptr<void>) (<ROS>/librclcpp_acti …
+    #8 in rclcpp_action::ClientBase::execute(std::shared_ptr<void> const&) (<ROS>/librclcpp_action.so+0x17d98)
+    #9 in rclcpp::Executor::execute_any_executable(rclcpp::AnyExecutable&) (<ROS>/librclcpp.so+0x11789a)
+
+Indirect leak of 120 byte(s) in 1 object(s) allocated from:
+    #0 in operator new(unsigned long) ../../../../src/libsanitizer/asan/asan_new_delete.cpp:95
+    #7 in robot_sdk::NavigationAPI::goToAsync(robot_sdk::NavigationGoal const&, std::function<void (robot_sdk::NavigationFeedba …
+    #8 in main src/robot_sdk_examples/src/demo_navigation.cpp:60
+    #11 in _start (build/robot_sdk_examples/demo_navigation+0x45da4)
+
+Indirect leak of 120 byte(s) in 1 object(s) allocated from:
+    #0 in operator new(unsigned long) ../../../../src/libsanitizer/asan/asan_new_delete.cpp:95
+    #7 in robot_sdk::NavigationAPI::goToAsync(robot_sdk::NavigationGoal const&, std::function<void (robot_sdk::NavigationFeedba …
+    #8 in robot_sdk::NavigationAPI::goTo(robot_sdk::NavigationGoal const&) (install/robot_sdk_core/lib/librobot_sdk_core.so+0xe …
+    #9 in main src/robot_sdk_examples/src/demo_navigation.cpp:79
+    #12 in _start (build/robot_sdk_examples/demo_navigation+0x45da4)
+
+Indirect leak of 112 byte(s) in 2 object(s) allocated from:
+    #0 in operator new(unsigned long) ../../../../src/libsanitizer/asan/asan_new_delete.cpp:95
+    #8 in rclcpp_action::Client<robot_sdk_interfaces::action::NavigateToPose>::make_result_aware(std::shared_ptr<rclcpp_action: …
+    #12 in rclcpp_action::ClientBase::handle_result_response(rmw_request_id_s const&, std::shared_ptr<void>) (<ROS>/librclcpp_ac …
+    #13 in rclcpp_action::ClientBase::execute(std::shared_ptr<void> const&) (<ROS>/librclcpp_action.so+0x17e54)
+    #14 in rclcpp::Executor::execute_any_executable(rclcpp::AnyExecutable&) (<ROS>/librclcpp.so+0x11789a)
+    #15 in rclcpp::executors::MultiThreadedExecutor::run(unsigned long) (<ROS>/librclcpp.so+0x141d36)
+
+Indirect leak of 96 byte(s) in 2 object(s) allocated from:
+    #0 in operator new(unsigned long) ../../../../src/libsanitizer/asan/asan_new_delete.cpp:95
+    #9 in rclcpp_action::ClientGoalHandle<robot_sdk_interfaces::action::NavigateToPose>::ClientGoalHandle(action_msgs::msg::Goa …
+    #10 in rclcpp_action::Client<robot_sdk_interfaces::action::NavigateToPose>::async_send_goal(robot_sdk_interfaces::action::Na …
+    #14 in rclcpp_action::ClientBase::handle_goal_response(rmw_request_id_s const&, std::shared_ptr<void>) (<ROS>/librclcpp_acti …
+    #15 in rclcpp_action::ClientBase::execute(std::shared_ptr<void> const&) (<ROS>/librclcpp_action.so+0x17d98)
+    #16 in rclcpp::Executor::execute_any_executable(rclcpp::AnyExecutable&) (<ROS>/librclcpp.so+0x11789a)
+
+Indirect leak of 64 byte(s) in 1 object(s) allocated from:
+    #0 in operator new(unsigned long) ../../../../src/libsanitizer/asan/asan_new_delete.cpp:95
+    #7 in rclcpp_action::Client<robot_sdk_interfaces::action::NavigateToPose>::SharedPtr rclcpp_action::create_client<robot_sdk …
+    #8 in rclcpp_action::Client<robot_sdk_interfaces::action::NavigateToPose>::SharedPtr rclcpp_action::create_client<robot_sdk …
+    #9 in robot_sdk::NavigationAPI::NavigationAPI(std::shared_ptr<rclcpp::Node> const&, std::shared_ptr<rclcpp::CallbackGroup> …
+    #11 in robot_sdk::Robot::Robot(std::shared_ptr<robot_sdk::RobotRuntime>) (install/robot_sdk_core/lib/librobot_sdk_core.so+0x …
+    #12 in robot_sdk::Robot::Robot(robot_sdk::RobotConfig const&) (install/robot_sdk_core/lib/librobot_sdk_core.so+0xebd0b5)
+
+Indirect leak of 48 byte(s) in 1 object(s) allocated from:
+    #0 in operator new(unsigned long) ../../../../src/libsanitizer/asan/asan_new_delete.cpp:95
+    #15 in rclcpp_action::Client<robot_sdk_interfaces::action::NavigateToPose>::async_send_goal(robot_sdk_interfaces::action::Na …
+    #16 in robot_sdk::NavigationAPI::goToAsync(robot_sdk::NavigationGoal const&, std::function<void (robot_sdk::NavigationFeedba …
+    #17 in robot_sdk::NavigationAPI::goTo(robot_sdk::NavigationGoal const&) (install/robot_sdk_core/lib/librobot_sdk_core.so+0xe …
+    #18 in main src/robot_sdk_examples/src/demo_navigation.cpp:79
+    #21 in _start (build/robot_sdk_examples/demo_navigation+0x45da4)
+
+Indirect leak of 48 byte(s) in 1 object(s) allocated from:
+    #0 in operator new(unsigned long) ../../../../src/libsanitizer/asan/asan_new_delete.cpp:95
+    #15 in rclcpp_action::Client<robot_sdk_interfaces::action::NavigateToPose>::async_send_goal(robot_sdk_interfaces::action::Na …
+    #16 in robot_sdk::NavigationAPI::goToAsync(robot_sdk::NavigationGoal const&, std::function<void (robot_sdk::NavigationFeedba …
+    #17 in main src/robot_sdk_examples/src/demo_navigation.cpp:60
+    #20 in _start (build/robot_sdk_examples/demo_navigation+0x45da4)
+
+Indirect leak of 48 byte(s) in 2 object(s) allocated from:
+    #0 in operator new(unsigned long) ../../../../src/libsanitizer/asan/asan_new_delete.cpp:95
+    #5 in rclcpp_action::Client<robot_sdk_interfaces::action::NavigateToPose>::async_send_goal(robot_sdk_interfaces::action::Na …
+    #9 in rclcpp_action::ClientBase::handle_goal_response(rmw_request_id_s const&, std::shared_ptr<void>) (<ROS>/librclcpp_acti …
+    #10 in rclcpp_action::ClientBase::execute(std::shared_ptr<void> const&) (<ROS>/librclcpp_action.so+0x17d98)
+    #11 in rclcpp::Executor::execute_any_executable(rclcpp::AnyExecutable&) (<ROS>/librclcpp.so+0x11789a)
+    #12 in rclcpp::executors::MultiThreadedExecutor::run(unsigned long) (<ROS>/librclcpp.so+0x141d36)
+
+Indirect leak of 40 byte(s) in 1 object(s) allocated from:
+    #0 in operator new(unsigned long) ../../../../src/libsanitizer/asan/asan_new_delete.cpp:95
+    #8 in rclcpp_action::Client<robot_sdk_interfaces::action::NavigateToPose>::async_send_goal(robot_sdk_interfaces::action::Na …
+    #9 in robot_sdk::NavigationAPI::goToAsync(robot_sdk::NavigationGoal const&, std::function<void (robot_sdk::NavigationFeedba …
+    #10 in main src/robot_sdk_examples/src/demo_navigation.cpp:60
+    #13 in _start (build/robot_sdk_examples/demo_navigation+0x45da4)
+
+Indirect leak of 40 byte(s) in 1 object(s) allocated from:
+    #0 in operator new(unsigned long) ../../../../src/libsanitizer/asan/asan_new_delete.cpp:95
+    #8 in rclcpp_action::Client<robot_sdk_interfaces::action::NavigateToPose>::async_send_goal(robot_sdk_interfaces::action::Na …
+    #9 in robot_sdk::NavigationAPI::goToAsync(robot_sdk::NavigationGoal const&, std::function<void (robot_sdk::NavigationFeedba …
+    #10 in robot_sdk::NavigationAPI::goTo(robot_sdk::NavigationGoal const&) (install/robot_sdk_core/lib/librobot_sdk_core.so+0xe …
+    #11 in main src/robot_sdk_examples/src/demo_navigation.cpp:79
+    #14 in _start (build/robot_sdk_examples/demo_navigation+0x45da4)
+
+Indirect leak of 32 byte(s) in 1 object(s) allocated from:
+    #0 in operator new(unsigned long) ../../../../src/libsanitizer/asan/asan_new_delete.cpp:95
+    #4 in robot_sdk::NavigationAPI::goToAsync(robot_sdk::NavigationGoal const&, std::function<void (robot_sdk::NavigationFeedba …
+    #5 in main src/robot_sdk_examples/src/demo_navigation.cpp:60
+    #8 in _start (build/robot_sdk_examples/demo_navigation+0x45da4)
+
+Indirect leak of 32 byte(s) in 2 object(s) allocated from:
+    #0 in operator new(unsigned long) ../../../../src/libsanitizer/asan/asan_new_delete.cpp:95
+    #6 in rclcpp_action::ClientGoalHandle<robot_sdk_interfaces::action::NavigateToPose>::ClientGoalHandle(action_msgs::msg::Goa …
+    #7 in rclcpp_action::Client<robot_sdk_interfaces::action::NavigateToPose>::async_send_goal(robot_sdk_interfaces::action::Na …
+    #11 in rclcpp_action::ClientBase::handle_goal_response(rmw_request_id_s const&, std::shared_ptr<void>) (<ROS>/librclcpp_acti …
+    #12 in rclcpp_action::ClientBase::execute(std::shared_ptr<void> const&) (<ROS>/librclcpp_action.so+0x17d98)
+    #13 in rclcpp::Executor::execute_any_executable(rclcpp::AnyExecutable&) (<ROS>/librclcpp.so+0x11789a)
+
+Indirect leak of 24 byte(s) in 1 object(s) allocated from:
+    #0 in operator new(unsigned long) ../../../../src/libsanitizer/asan/asan_new_delete.cpp:95
+    #1 in rclcpp::Node::Node(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::__cxx …
+    #8 in robot_sdk::RobotRuntime::RobotRuntime(robot_sdk::RobotConfig const&) (install/robot_sdk_core/lib/librobot_sdk_core.so …
+    #15 in robot_sdk::Robot::Robot(robot_sdk::RobotConfig const&) (install/robot_sdk_core/lib/librobot_sdk_core.so+0xebd0a2)
+    #16 in main src/robot_sdk_examples/src/demo_navigation.cpp:30
+    #19 in _start (build/robot_sdk_examples/demo_navigation+0x45da4)
+
+SUMMARY: AddressSanitizer: 1624 byte(s) leaked in 22 allocation(s).
