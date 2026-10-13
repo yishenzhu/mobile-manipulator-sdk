@@ -12,20 +12,23 @@ namespace robot_sdk {
 
 StatusAPI::StatusAPI(const rclcpp::Node::SharedPtr& node,
                      const rclcpp::CallbackGroup::SharedPtr& callback_group,
-                     const StatusConfig& config)
-    : node_(node), config_(config), callback_group_(callback_group) {
+                     const StatusConfig& config, const QosConfig& qos)
+    : node_(node),
+      config_(config),
+      status_qos_(qos.status),
+      joint_states_qos_(qos.joint_states),
+      callback_group_(callback_group) {
   rclcpp::SubscriptionOptions options;
   // ★ 与 PerceptionAPI 同理：回调组决定线程语义。
   //   忘了传 → 落进节点的默认组（互斥），与客户自己的回调互相拖累。
   options.callback_group = callback_group_;
 
-  // 状态是低频、且"最新一条才有意义"，所以深度 1 + reliable。
-  rclcpp::QoS status_qos(rclcpp::KeepLast(1));
-  status_qos.reliable();
+  // 状态是低频、"最新一条才有意义" ⇒ 深度 1（由 QosConfig::status 给）；拼装问 SubscriptionQos 要。
+  auto status_sub_qos = status_qos_.toQos();
 
   // 话题名用相对名，由 rcl 按节点命名空间展开（见 学习笔记.md 第 15 节）。
   status_subscription_ = node_->create_subscription<RobotStatus>(
-      config_.status_topic, status_qos,
+      config_.status_topic, status_sub_qos,
       [this](RobotStatus::ConstSharedPtr msg) {
         status_cache_.update(msg);
         // 先**在锁内拷一份回调列表**，再**在锁外**调用 ——
@@ -42,7 +45,7 @@ StatusAPI::StatusAPI(const rclcpp::Node::SharedPtr& node,
       options);
 
   joint_state_subscription_ = node_->create_subscription<JointState>(
-      config_.joint_states_topic, rclcpp::SensorDataQoS(),
+      config_.joint_states_topic, joint_states_qos_.toQos(),
       [this](JointState::ConstSharedPtr msg) { joint_state_cache_.update(msg); }, options);
 
   // service client 也要指定回调组，否则响应回调会落到默认组。

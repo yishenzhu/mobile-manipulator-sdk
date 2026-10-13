@@ -191,10 +191,9 @@ MockRobotNode::MockRobotNode(const rclcpp::NodeOptions &options)
   joint_pub_ = create_publisher<sensor_msgs::msg::JointState>(
       config_.status.joint_states_topic, 10);
 
-  // 传感器用与 SDK 侧 `PerceptionAPI` **完全相同的 QoS**：
-  // best_effort + keep_last(队列深度)。两边不一致的话订阅会**静默收不到**数据。
-  auto sensor_qos = rclcpp::SensorDataQoS();
-  sensor_qos.keep_last(static_cast<std::size_t>(config_.perception.queue_depth));
+  // 传感器用**与 SDK 侧同一个** QoS 定义 —— 直接问 `SubscriptionQos` 要，别再自己拼一遍：
+  // 两边不一致的话订阅会**静默收不到**数据，而"同一个知识两处各存一份"迟早漂移。
+  auto sensor_qos = config_.qos.sensor.toQos();
   scan_pub_ = create_publisher<sensor_msgs::msg::LaserScan>(
       config_.perception.laser_scan_topic, sensor_qos);
   imu_pub_ = create_publisher<sensor_msgs::msg::Imu>(config_.perception.imu_topic,

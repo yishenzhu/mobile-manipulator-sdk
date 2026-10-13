@@ -40,12 +40,13 @@ class PerceptionAPI {
   using CameraInfoPtr = CameraInfo::ConstSharedPtr;
   using PointCloud2Ptr = PointCloud2::ConstSharedPtr;
 
-  /// 只接收自己需要的那一份配置（接口隔离）。
+  /// 只接收自己需要的那两份（接口隔离）：业务配置 + **本订阅的** QoS。
+  /// QoS 由 `Robot` 按角色分发（这里对应 `QosConfig::sensor`），本类不关心全局 QoS 的形状。
   /// ⚠️ 话题名是**相对名**，不自己拼前缀 —— rcl 会按节点命名空间展开。
   /// 想要别的命名空间就把节点建在那儿，而不是逐名字覆盖。
   PerceptionAPI(const rclcpp::Node::SharedPtr& node,
                 const rclcpp::CallbackGroup::SharedPtr& callback_group,
-                const PerceptionConfig& config);
+                const PerceptionConfig& config, const SubscriptionQos& sub_qos);
 
   std::optional<LaserScanPtr> laserScan() const { return laser_scan_.latest(); }
   std::optional<ImuPtr> imu() const { return imu_.latest(); }
@@ -79,6 +80,8 @@ class PerceptionAPI {
 
   rclcpp::Node::SharedPtr node_;
   PerceptionConfig config_;
+  /// = `QosConfig::sensor`：五个感知订阅共用这一份（它们同类）。
+  SubscriptionQos qos_;
 
   Cache<LaserScan> laser_scan_;
   Cache<Imu> imu_;

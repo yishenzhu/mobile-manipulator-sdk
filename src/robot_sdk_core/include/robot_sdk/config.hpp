@@ -57,7 +57,6 @@ struct PerceptionConfig {
   std::string depth_image_topic{"camera/depth/image_raw"};
   std::string point_cloud_topic{"camera/depth/points"};
   std::string camera_info_topic{"camera/depth/camera_info"};
-  int queue_depth{10};
   double sensor_timeout_s{5.0};
 };
 
@@ -66,6 +65,32 @@ struct StatusConfig {
   std::string joint_states_topic{"joint_states"};
   std::string get_status_service{"get_robot_status"};
   double default_timeout_s{5.0};
+};
+
+/// 一个订阅的传输参数（QoS）。业务配置管"订哪个话题"，这里管"怎么订"。
+struct SubscriptionQos {
+  /// KEEP_LAST 的队列深度（QoS 的 history depth）。
+  int depth{10};
+  /// 取值：best_effort | reliable | system_default；其余一律按 Unknown 处理。
+  std::string reliability{"best_effort"};
+
+  /// 拼出本订阅的 rclcpp QoS。
+  rclcpp::QoS toQos() const;
+
+  /// 字符串 → ReliabilityPolicy。只认上面三个值，其余（含 unknown / best_available）落成 Unknown，不抛。
+  static rclcpp::ReliabilityPolicy reliabilityFrom(const std::string& value);
+
+  /// 从 ROS 参数读（`<prefix>.depth` 与 `<prefix>.reliability`），默认值用本结构字段自身的。
+  static SubscriptionQos fromNode(rclcpp::Node& node, const std::string& prefix);
+};
+
+/// 全局 QoS：一处配好、各模块按需取用（Robot 装配时按角色分发）。
+/// 角色按数据性质分：sensor = 5 个感知话题，joint_states = /joint_states，status = /robot_status。
+/// ⚠️ 默认值由兼容规则决定（订阅端只能比发布端更宽松）；推导与实测见 docs/qos.md。
+struct QosConfig {
+  SubscriptionQos sensor{10, "best_effort"};
+  SubscriptionQos joint_states{5, "best_effort"};
+  SubscriptionQos status{1, "reliable"};
 };
 
 struct RobotConfig {
@@ -81,6 +106,8 @@ struct RobotConfig {
   MotionConfig motion{};
   PerceptionConfig perception{};
   StatusConfig status{};
+  /// 传输层的 QoS 集中在这一处；各 API 由 Robot 装配时按角色取用。
+  QosConfig qos{};
 
   /// 从 `node` 上声明的 ROS 参数填充配置。
   /// 参数名镜像结构体路径，例如 `navigation.global_frame`。

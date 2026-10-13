@@ -30,6 +30,29 @@ T getExistingOrDeclare(rclcpp::Node &node, const std::string &name,
 
 } // namespace
 
+// SubscriptionQos：QoS 的全部知识都在这个类型里。
+rclcpp::ReliabilityPolicy SubscriptionQos::reliabilityFrom(const std::string &value) {
+  if (value == "best_effort") return rclcpp::ReliabilityPolicy::BestEffort;
+  if (value == "reliable") return rclcpp::ReliabilityPolicy::Reliable;
+  if (value == "system_default") return rclcpp::ReliabilityPolicy::SystemDefault;
+  return rclcpp::ReliabilityPolicy::Unknown;
+}
+
+rclcpp::QoS SubscriptionQos::toQos() const {
+  // depth <= 0 时退回 1，避免拼出深度 0 的非法 QoS。
+  rclcpp::QoS qos(rclcpp::KeepLast(depth > 0 ? static_cast<std::size_t>(depth) : 1u));
+  qos.reliability(reliabilityFrom(reliability));
+  return qos;
+}
+
+SubscriptionQos SubscriptionQos::fromNode(rclcpp::Node &node, const std::string &prefix) {
+  SubscriptionQos qos;
+  qos.depth = declareAndGet<int>(node, prefix + ".depth", qos.depth);
+  qos.reliability =
+      declareAndGet<std::string>(node, prefix + ".reliability", qos.reliability);
+  return qos;
+}
+
 RobotConfig RobotConfig::fromNode(rclcpp::Node &node) {
   RobotConfig cfg;
 
@@ -89,8 +112,6 @@ RobotConfig RobotConfig::fromNode(rclcpp::Node &node) {
       node, "perception.point_cloud_topic", cfg.perception.point_cloud_topic);
   cfg.perception.camera_info_topic = declareAndGet<std::string>(
       node, "perception.camera_info_topic", cfg.perception.camera_info_topic);
-  cfg.perception.queue_depth = declareAndGet<int>(
-      node, "perception.queue_depth", cfg.perception.queue_depth);
   cfg.perception.sensor_timeout_s = declareAndGet<double>(
       node, "perception.sensor_timeout_s", cfg.perception.sensor_timeout_s);
 
@@ -102,6 +123,11 @@ RobotConfig RobotConfig::fromNode(rclcpp::Node &node) {
       node, "status.get_status_service", cfg.status.get_status_service);
   cfg.status.default_timeout_s = declareAndGet<double>(
       node, "status.default_timeout_s", cfg.status.default_timeout_s);
+
+  // 传输层 QoS：集中在这里，参数名按角色展开（与结构体路径一致）。
+  cfg.qos.sensor = SubscriptionQos::fromNode(node, "qos.sensor");
+  cfg.qos.joint_states = SubscriptionQos::fromNode(node, "qos.joint_states");
+  cfg.qos.status = SubscriptionQos::fromNode(node, "qos.status");
 
   return cfg;
 }

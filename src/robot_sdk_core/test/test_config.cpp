@@ -82,7 +82,7 @@ TEST_F(ConfigNodeTest, ReadsEveryParameterGroup) {
       rclcpp::Parameter("motion.gripper_open_position", 0.08),
       rclcpp::Parameter("motion.gripper_timeout_s", 1.5),
       rclcpp::Parameter("perception.laser_scan_topic", "front/scan"),
-      rclcpp::Parameter("perception.queue_depth", 3),
+      rclcpp::Parameter("qos.sensor.depth", 3),
       rclcpp::Parameter("status.status_topic", "health"),
   });
   auto node = std::make_shared<rclcpp::Node>("robot_sdk_config_groups_test", options);
@@ -95,7 +95,7 @@ TEST_F(ConfigNodeTest, ReadsEveryParameterGroup) {
   EXPECT_DOUBLE_EQ(cfg.motion.gripper_open_position, 0.08);
   EXPECT_DOUBLE_EQ(cfg.motion.gripper_timeout_s, 1.5);
   EXPECT_EQ(cfg.perception.laser_scan_topic, "front/scan");
-  EXPECT_EQ(cfg.perception.queue_depth, 3);
+  EXPECT_EQ(cfg.qos.sensor.depth, 3);
   EXPECT_EQ(cfg.status.status_topic, "health");
   EXPECT_EQ(cfg.node_namespace, "robot1");
   // 没覆盖的组保持默认

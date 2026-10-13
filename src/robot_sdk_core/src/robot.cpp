@@ -23,8 +23,10 @@ Robot::Robot(std::shared_ptr<RobotRuntime> runtime) : runtime_(std::move(runtime
   navigation_ = std::make_unique<NavigationAPI>(node, runtime_->controlGroup(), transform_,
                                                 cfg.navigation);
   motion_ = std::make_unique<MotionAPI>(node, runtime_->controlGroup(), cfg.motion);
-  perception_ = std::make_unique<PerceptionAPI>(node, runtime_->sensorGroup(), cfg.perception);
-  status_ = std::make_unique<StatusAPI>(node, runtime_->statusGroup(), cfg.status);
+  // QoS 集中在 cfg.qos，这里按**角色**分发 —— 全项目只有这一处把角色映射到 API。
+  perception_ = std::make_unique<PerceptionAPI>(node, runtime_->sensorGroup(), cfg.perception,
+                                               cfg.qos.sensor);
+  status_ = std::make_unique<StatusAPI>(node, runtime_->statusGroup(), cfg.status, cfg.qos);
 }
 
 // ---------------------------------------------------------------------------

@@ -45,16 +45,10 @@ jobs:
           colcon build --symlink-install --event-handlers console_cohesion+
 
       - name: 测试
-        run: |
-          source /opt/ros/jazzy/setup.bash
-          source install/setup.bash
-          # ⚠️ run: 默认是 `bash -e pipefail` —— 直接写 `colcon test` 的话，它一失败就
-          #    跳过下面的 test-result，而那正是最需要的逐条明细。所以先接住返回值。
-          # ⚠️ 单 worker：Nav2 整栈 + 真栈（ros2_control + move_group）同时跑会互相挤，
-          #    而几条探针是按时序判定的（真栈一条就要 ~30 s）。慢一点，但结论可信。
-          colcon test --parallel-workers 1 && rc=0 || rc=$?
-          colcon test-result --verbose || true
-          exit $rc
+        # 脚本自己 source ROS、按时间戳留档每份结果、并把失败的测试名打出来（见脚本头部）。
+        # ⚠️ 单 worker：Nav2 整栈 + 真栈（ros2_control + move_group）同时跑会互相挤，
+        #    而几条探针是按时序判定的（真栈一条就要 ~30 s）。慢一点，但结论可信。
+        run: ./scripts/run_tests.sh --parallel-workers 1
 
       # 失败必须留证据：colcon 的原始日志 + 每个包的 test_results。
       # 没有它，CI 红了只能看到一句摘要，还得本地复现才知道是谁挂的。

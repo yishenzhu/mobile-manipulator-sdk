@@ -173,6 +173,7 @@ colcon test-result --verbose
 | 验收探针怎么跑、为什么老挂住 | [`src/robot_sdk_tests/README.md`](src/robot_sdk_tests/README.md) |
 | **怎么让 Agent（Walle）用自然语言驱动机器人** | [`docs/agent-integration-plan.md`](docs/agent-integration-plan.md)（计划 + 实测；`robot_sdk_mcp` 的用法见其 README） |
 | **一个真实的生命周期 bug：句柄的引用环**（含 LSan / TSan 实测数字） | [`docs/action-handle-lifetime.md`](docs/action-handle-lifetime.md) |
+| **QoS 契约：订阅用什么、不兼容为什么是静默的、怎么改** | [`docs/qos.md`](docs/qos.md) |
 
 还没建立全局印象时，先看 [`docs/file-map.md`](docs/file-map.md)：它按包列出**每个文件干什么**，
 并把包之间的调用关系画成图。

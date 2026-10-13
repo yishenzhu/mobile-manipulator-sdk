@@ -32,9 +32,12 @@ class StatusAPI {
   using RobotStatusPtr = RobotStatus::ConstSharedPtr;
   using JointStatePtr = JointState::ConstSharedPtr;
 
-  /// 只接收自己需要的那一份配置（接口隔离）。
+  /// 只接收自己需要的那两份（接口隔离）：业务配置 + 全局 QoS。
+  /// ⚠️ 这里收**整个** `QosConfig` 而不是两个 `SubscriptionQos` 参数：本类有两个订阅角色
+  ///    （`status` / `joint_states`），两个同类型参数并排很容易写反 —— 按名字取用更稳。
   StatusAPI(const rclcpp::Node::SharedPtr& node,
-            const rclcpp::CallbackGroup::SharedPtr& callback_group, const StatusConfig& config);
+            const rclcpp::CallbackGroup::SharedPtr& callback_group, const StatusConfig& config,
+            const QosConfig& qos);
 
   /// 最近一次推送的状态；还没收到过则为 nullopt。
   std::optional<RobotStatusPtr> status() const;
@@ -67,6 +70,9 @@ class StatusAPI {
  private:
   rclcpp::Node::SharedPtr node_;
   StatusConfig config_;
+  /// 两个订阅角色各自的 QoS（构造时从 `QosConfig` 取出来，之后不再依赖它）。
+  SubscriptionQos status_qos_;
+  SubscriptionQos joint_states_qos_;
   rclcpp::CallbackGroup::SharedPtr callback_group_;
 
   LatestValueCache<RobotStatusPtr> status_cache_;

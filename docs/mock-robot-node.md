@@ -920,12 +920,12 @@ z = z 深度本身
 ```cpp
 // mock（发布）
 auto sensor_qos = rclcpp::SensorDataQoS();
-sensor_qos.keep_last(config_.perception.queue_depth);
+sensor_qos.keep_last(config_.qos.sensor.depth);
 
 // SDK `perception_api.cpp`（订阅）—— 同样的两句
 ```
 
-**不一致的后果是"静默收不到"**，而不是报错。特别是：`SensorDataQoS()` 的默认深度是 **5**，而 `perception.queue_depth` 的默认值是 **10** —— 不显式 `keep_last` 的话，那个配置项就是"改了不生效"的死配置。SDK 侧已经踩过这个坑（`perception_api.cpp` 里有注释），mock 侧照抄。
+**不一致的后果是"静默收不到"**，而不是报错。特别是：`SensorDataQoS()` 的默认深度是 **5**，而 `qos.sensor.depth` 的默认值是 **10** —— 不显式 `keep_last` 的话，那个配置项就是"改了不生效"的死配置。SDK 侧已经踩过这个坑（`perception_api.cpp` 里有注释），mock 侧照抄。
 
 ### 11.6 验收数据（**全是解析解**）
 

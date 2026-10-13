@@ -350,7 +350,6 @@ PYBIND11_MODULE(_robot_sdk, m) {
       .def_readwrite("depth_image_topic", &PerceptionConfig::depth_image_topic)
       .def_readwrite("point_cloud_topic", &PerceptionConfig::point_cloud_topic)
       .def_readwrite("camera_info_topic", &PerceptionConfig::camera_info_topic)
-      .def_readwrite("queue_depth", &PerceptionConfig::queue_depth)
       .def_readwrite("sensor_timeout_s", &PerceptionConfig::sensor_timeout_s);
 
   py::class_<StatusConfig>(m, "StatusConfig")
@@ -359,6 +358,18 @@ PYBIND11_MODULE(_robot_sdk, m) {
       .def_readwrite("joint_states_topic", &StatusConfig::joint_states_topic)
       .def_readwrite("get_status_service", &StatusConfig::get_status_service)
       .def_readwrite("default_timeout_s", &StatusConfig::default_timeout_s);
+
+  // ── 传输层：QoS（与业务配置分开，见 docs/qos.md）──
+  py::class_<SubscriptionQos>(m, "SubscriptionQos", "一个订阅的传输参数（QoS）。")
+      .def(py::init<>())
+      .def_readwrite("depth", &SubscriptionQos::depth)
+      .def_readwrite("reliability", &SubscriptionQos::reliability);
+
+  py::class_<QosConfig>(m, "QosConfig", "全局 QoS：一处配好、各模块按需取用。")
+      .def(py::init<>())
+      .def_readwrite("sensor", &QosConfig::sensor)
+      .def_readwrite("joint_states", &QosConfig::joint_states)
+      .def_readwrite("status", &QosConfig::status);
 
   py::class_<RobotConfig>(m, "RobotConfig", "一个 Robot 的全部配置。")
       // 只给三个标量开构造参数（子配置字段多、名字也长，用属性赋值更清楚）。
@@ -377,7 +388,8 @@ PYBIND11_MODULE(_robot_sdk, m) {
       .def_readwrite("navigation", &RobotConfig::navigation)
       .def_readwrite("motion", &RobotConfig::motion)
       .def_readwrite("perception", &RobotConfig::perception)
-      .def_readwrite("status", &RobotConfig::status);
+      .def_readwrite("status", &RobotConfig::status)
+      .def_readwrite("qos", &RobotConfig::qos);
 
   // ── 目标（客户给进去的）──
   py::class_<MotionGoal>(m, "MotionGoal", "关节空间目标。")

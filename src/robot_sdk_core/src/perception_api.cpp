@@ -30,17 +30,16 @@ Result<PtrT> waitForCache(LatestValueCache<PtrT> &cache,
 PerceptionAPI::PerceptionAPI(
     const rclcpp::Node::SharedPtr &node,
     const rclcpp::CallbackGroup::SharedPtr &callback_group,
-    const PerceptionConfig &config)
-    : node_(node), config_(config) {
+    const PerceptionConfig &config, const SubscriptionQos &sub_qos)
+    : node_(node), config_(config), qos_(sub_qos) {
   rclcpp::SubscriptionOptions options;
   // ★ 这一行决定所有传感器回调落在哪个回调组：Robot 传的是 sensor 组（Reentrant），
   //   五个高频传感器才并发。忘了传 ⇒ 落进默认组（互斥）⇒ 全部串行、静默失效、运行时不报错。
   options.callback_group = callback_group;
 
-  auto qos = rclcpp::SensorDataQoS();
-  // 把配置里的 queue_depth 接到 QoS 上：SensorDataQoS() 默认深度是 5，与配置默认值 10
-  // 并不相同 —— 不写这行，perception.queue_depth 就是个"改了不生效"的死配置。
-  qos.keep_last(static_cast<std::size_t>(config_.queue_depth));
+  // QoS 由 Robot 按角色分发进来（= QosConfig::sensor），拼装问 `SubscriptionQos` 要 ——
+  // QoS 的知识只在那个类型里。**传感器订阅必须比发布端更宽松**，否则静默收不到（见 docs/qos.md）。
+  auto qos = qos_.toQos();
 
   // 话题名用**相对名**（"scan"），不自己拼前缀 —— rcl 会按节点命名空间展开。
   // 想要别的命名空间就把节点建在那儿，重复实现这套规则只会多出一份不一致的。

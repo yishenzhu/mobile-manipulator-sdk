@@ -292,7 +292,7 @@ mock 给了一个**最简单的世界**：一个长方体房间，六个面就�
 | **CameraInfo** | 内参**从视场推出来**：`fx = (宽/2)/tan(60°/2) ≈ 55.43`，`fy = fx` | 这样内参和图像天然自洽 —— 验收里可以反推 `atan(cx/fx)` 必须正好等于半个视场 |
 | **点云** | 是**深度图的另一种排法**（反投影），不是新信息 | 所以它直接吃已经算好的深度图，**不重打一遍射线**。它是有组织点云（48×64），真机的 `depth_image_proc` 也这么发 |
 
-**QoS 必须与 SDK 侧逐字一致**：`SensorDataQoS()` + `keep_last(queue_depth)`。**不一致的后果是"静默收不到"**，不是报错。特别是 `SensorDataQoS()` 默认深度是 5，而 `perception.queue_depth` 默认是 10 —— 不显式 `keep_last` 的话，那个配置项就是个"改了不生效"的死配置。
+**QoS 必须与 SDK 侧逐字一致**：`SensorDataQoS()` + `keep_last(qos.sensor.depth)`。**不一致的后果是"静默收不到"**，不是报错。特别是 `SensorDataQoS()` 默认深度是 5，而 `qos.sensor.depth` 默认是 10 —— 不显式 `keep_last` 的话，那个配置项就是个"改了不生效"的死配置。
 
 **`camera_link → camera_optical_frame` 那条静态 TF 必须发**：ROS 图像系是 z 前/x 右/y 下，body 系是 x 前/y 左/z 上，差一个固定旋转。少发它（或写反）**不会报错**，只会让客户所有投影结果都错 —— 而"错误但看起来合理"是这个项目最怕的一类 bug。
 

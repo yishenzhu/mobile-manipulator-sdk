@@ -23,7 +23,8 @@ private:
 };
 
 /// 要么是 T，要么是 Error。
-/// SDK 的公开接口从不抛异常，调用者必须显式检查 ok() / error()。
+/// **运行期**接口从不抛异常，调用者必须显式检查 ok() / error()。
+/// ⚠️ 例外是构造期：ctor 没有 Result 通道，配置非法以 SdkException 出来（绑定层翻成 RobotSdkError）。
 template <typename T> class Result {
 public:
   Result(T value) : value_(std::move(value)) {}
