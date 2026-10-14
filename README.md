@@ -176,7 +176,7 @@ python3 $(ros2 pkg prefix robot_sdk_py)/share/robot_sdk_py/python/demo_navigatio
 | **怎么让 Agent（Walle）用自然语言驱动机器人** | [`docs/agent-integration-plan.md`](docs/agent-integration-plan.md)（计划 + 实测；`robot_sdk_mcp` 的用法见其 README） |
 | **一个真实的生命周期 bug：句柄的引用环**（含 LSan / TSan 实测数字） | [`docs/action-handle-lifetime.md`](docs/action-handle-lifetime.md) |
 | **QoS 契约：订阅用什么、不兼容为什么是静默的、怎么改** | [`docs/qos.md`](docs/qos.md) |
-| **Python 侧性能：缓存读 4.3 µs（含属性访问）、动作 ≥20 ms 由谁决定、GIL 到底放开没有** | [`docs/performance.md`](docs/performance.md)（`./scripts/run_bench.sh` 一条命令复现） |
+| **Python 侧性能：缓存读 4.3 µs、MCP 工具往返 1.8 ms、动作 ≥20 ms 由谁决定、GIL 到底放开没有** | [`docs/performance.md`](docs/performance.md)（`./scripts/run_bench*.sh` 两条命令复现） |
 
 还没建立全局印象时，先看 [`docs/file-map.md`](docs/file-map.md)：它按包列出**每个文件干什么**，
 并把包之间的调用关系画成图。
