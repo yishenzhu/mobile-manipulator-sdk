@@ -8,6 +8,8 @@
 
 #include <rclcpp/qos.hpp>
 
+#include "robot_sdk/detail/subscription_wait.hpp"
+
 namespace robot_sdk {
 
 StatusAPI::StatusAPI(const rclcpp::Node::SharedPtr& node,
@@ -64,20 +66,16 @@ std::optional<StatusAPI::JointStatePtr> StatusAPI::jointStates() const {
 
 Result<StatusAPI::RobotStatusPtr> StatusAPI::waitForStatus(
     std::chrono::duration<double> timeout) {
-  auto value = status_cache_.waitForValue(timeout);
-  if (!value) {
-    return Error::Timeout("no robot status received within timeout");
-  }
-  return *value;
+  return waitForCache(status_cache_, timeout,
+                      {*node_, status_qos_, status_subscription_->get_topic_name(),
+                       "robot status"});
 }
 
 Result<StatusAPI::JointStatePtr> StatusAPI::waitForJointStates(
     std::chrono::duration<double> timeout) {
-  auto value = joint_state_cache_.waitForValue(timeout);
-  if (!value) {
-    return Error::Timeout("no joint states received within timeout");
-  }
-  return *value;
+  return waitForCache(joint_state_cache_, timeout,
+                      {*node_, joint_states_qos_, joint_state_subscription_->get_topic_name(),
+                       "joint states"});
 }
 
 Result<StatusAPI::RobotStatus> StatusAPI::queryStatus(std::chrono::duration<double> timeout) {

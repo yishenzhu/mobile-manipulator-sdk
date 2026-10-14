@@ -174,18 +174,34 @@ python3 check_qos_compat.py reliable      # → TIMEOUT
 ⚠️ 脚本收尾必须 `robot.stop()` **再** `spinner.join()`：只 stop 不 join 的话，主线程退出时
 `spin()` 还在跑、析构会和它抢执行器（实测：`terminate called without an active exception` + core dump）。
 
-## 6. 下一步（可选）：把"静默"变成"大声"
+## 6. 已实现：把"静默"变成"大声"
 
 先说一条**实测更正**：rclcpp **已经**在订阅端发现不兼容发布端时打 WARN 了（§3 那条原话）——
-所以"静默"只是**对代码**而言（你只会看到 TIMEOUT）。SDK 要补的**不是"再查一遍"**，而是**把已有信息接到自己的错误面上**：
+所以"静默"只是**对代码**而言（以前一律是 `TIMEOUT`）。要补的不是"再查一遍"，而是**把已有信息接到 SDK 的错误面上**。
 
-- 可选的两条路：`rclcpp::qos_check_compatible()`（3 档 `QoSCompatibility { Ok, Warning, Error }`）、
-  `Node::get_publishers_info_by_topic()`（取发布端 QoS）；更直接的是接 rclcpp 的"QoS 不兼容"事件，
-  把状态记在 API 上。
-- 于是 `waitForLaserScan` 超时就能区分**原因**（下面是 SDK 期望的错误**措辞**，不是日志）：
+**做法**：`wait_*` 超时的那一刻（**只在超时路径上查，成功路径零开销**）调 `Node::get_publishers_info_by_topic()`
++ `rclcpp::qos_check_compatible()`，把原因写进错误。实现只有一处：
+`detail/subscription_wait.hpp::waitForCache()`，感知 5 个等待 + 状态 2 个等待共用它。
 
-```
-Error::Unavailable("该话题有发布端，但 QoS 不兼容：它对 BEST_EFFORT，本订阅要 RELIABLE")
-```
+三条实测输出（原始打印，复现命令见 §5）：
 
-这比"只给旋钮"有用：**旋钮让人自己去救，SDK 报出来才能自愈。**（这一节是**建议**，尚未实现。）
+| 场景 | `RobotSdkError` 的内容 |
+|---|---|
+| 有发布端但 QoS 不兼容 | `UNAVAILABLE: topic '/scan' has a publisher (qc_be_scan_pub) but its QoS is incompatible: ERROR: Best effort publisher and reliable subscription; [publisher reliability=best_effort, this subscription wants reliable]` |
+| 话题上压根没有发布端 | `UNAVAILABLE: topic '/scan' has no publisher at all` |
+| 有发布端、QoS 也兼容，只是还没数据 | `TIMEOUT: no laser scan received within timeout`（**措辞与改动前一字不差**） |
+
+三个决定（都有理由，不是随手写的）：
+
+- **超时那一刻去查，而不是接 QoS 事件**：查出来的是**真实策略**（上面那句 `Best effort publisher and reliable
+  subscription` 是 rcl 给的原文），事件只给一个计数；而且顺手把"压根没有发布端"也区分出来了 ——
+  这两种原因对应的动作完全不同（一个改 QoS、一个去查发布端为什么没起）。
+- **原因明确时用 `Unavailable`，不再报 `Timeout`**：同样是"没数据"，责任方不同就该给不同代码，
+  调用方（例如 agent）才能自己决定怎么办。**这是行为变化**（这些场景以前都是 `TIMEOUT`），已记入 CHANGELOG。
+- **消息用英文**：SDK 的公开错误消息本来就是英文，中文只出现在文档里。
+
+⚠️ 一处必须说明的写法：`qos_check_compatible()` 与 `get_publishers_info_by_topic()` 在 rclcpp 里**是会抛的**。
+"运行期不抛异常"的约定不变 —— 这里在**边界**上接住并降级成"没查出来"（继续报 `Timeout`）：
+诊断失败不该把一次 `Result` 变成异常。这是"接第三方会抛的 API"，不是"拿异常做控制流"。
+
+还没做：① 把它固化成回归测试（目前只有手工验证的这三条）；② 我们自己当 publisher 时的同类诊断。

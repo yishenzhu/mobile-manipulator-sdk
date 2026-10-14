@@ -7,25 +7,9 @@
 #include <rclcpp/qos.hpp>
 
 #include "robot_sdk/detail/scan_utils.hpp"
+#include "robot_sdk/detail/subscription_wait.hpp"
 
 namespace robot_sdk {
-namespace {
-
-/// 五个 waitForXxx 的唯一差别是「缓存 + 名字」，所以抽成一个模板
-/// （公开 API 仍逐一列出 —— 显式接口比"一个万能函数"好用，但实现不必复制五遍）。
-/// 名字参数用 const std::string&：只读不存，传字面量时短标签落在 SSO 内、无堆分配。
-template <typename PtrT>
-Result<PtrT> waitForCache(LatestValueCache<PtrT> &cache,
-                          PerceptionAPI::Duration timeout,
-                          const std::string &what) {
-  auto value = cache.waitForValue(timeout);
-  if (!value) {
-    return Error::Timeout("no " + what + " received within timeout");
-  }
-  return *value;
-}
-
-} // namespace
 
 PerceptionAPI::PerceptionAPI(
     const rclcpp::Node::SharedPtr &node,
@@ -78,26 +62,32 @@ PerceptionAPI::Duration PerceptionAPI::resolveTimeout(Duration timeout) const {
 
 Result<PerceptionAPI::LaserScanPtr>
 PerceptionAPI::waitForLaserScan(Duration timeout) {
-  return waitForCache(laser_scan_, resolveTimeout(timeout), "laser scan");
+  return waitForCache(laser_scan_, resolveTimeout(timeout),
+                      {*node_, qos_, laser_scan_subscription_->get_topic_name(), "laser scan"});
 }
 
 Result<PerceptionAPI::ImuPtr> PerceptionAPI::waitForImu(Duration timeout) {
-  return waitForCache(imu_, resolveTimeout(timeout), "IMU message");
+  return waitForCache(imu_, resolveTimeout(timeout),
+                      {*node_, qos_, imu_subscription_->get_topic_name(), "IMU message"});
 }
 
 Result<PerceptionAPI::ImagePtr>
 PerceptionAPI::waitForDepthImage(Duration timeout) {
-  return waitForCache(depth_image_, resolveTimeout(timeout), "depth image");
+  return waitForCache(depth_image_, resolveTimeout(timeout),
+                      {*node_, qos_, depth_image_subscription_->get_topic_name(), "depth image"});
 }
 
 Result<PerceptionAPI::CameraInfoPtr>
 PerceptionAPI::waitForCameraInfo(Duration timeout) {
-  return waitForCache(camera_info_, resolveTimeout(timeout), "camera info");
+  return waitForCache(camera_info_, resolveTimeout(timeout),
+                      {*node_, qos_, camera_info_subscription_->get_topic_name(), "camera info"});
 }
 
 Result<PerceptionAPI::PointCloud2Ptr>
 PerceptionAPI::waitForPointCloud(Duration timeout) {
-  return waitForCache(point_cloud_, resolveTimeout(timeout), "point cloud");
+  return waitForCache(point_cloud_, resolveTimeout(timeout),
+                      {*node_, qos_, point_cloud_subscription_->get_topic_name(),
+                       "point cloud"});
 }
 
 double PerceptionAPI::nearestObstacleDistance(double angle_min,
