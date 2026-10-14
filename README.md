@@ -174,6 +174,7 @@ python3 $(ros2 pkg prefix robot_sdk_py)/share/robot_sdk_py/python/demo_navigatio
 | Gazebo 那条链路怎么起、已知坑 | [`src/robot_sdk_gazebo/README.md`](src/robot_sdk_gazebo/README.md) |
 | 验收探针怎么跑、为什么老挂住 | [`src/robot_sdk_tests/README.md`](src/robot_sdk_tests/README.md) |
 | **怎么让 Agent（Walle）用自然语言驱动机器人** | [`docs/agent-integration-plan.md`](docs/agent-integration-plan.md)（计划 + 实测；`robot_sdk_mcp` 的用法见其 README） |
+| **真的用一句话驱动机器人**（含实测对话与两个真实的坑） | [`docs/agent-usage.md`](docs/agent-usage.md)（`walle-cli --agent robot_operator`） |
 | **一个真实的生命周期 bug：句柄的引用环**（含 LSan / TSan 实测数字） | [`docs/action-handle-lifetime.md`](docs/action-handle-lifetime.md) |
 | **QoS 契约：订阅用什么、不兼容为什么是静默的、怎么改** | [`docs/qos.md`](docs/qos.md) |
 | **接口契约：什么是公开 API、什么算破坏性改动、版本怎么发** | [`docs/contract.md`](docs/contract.md)（CI 里由 `scripts/check_contract.py` 守；变更记录见 [`CHANGELOG.md`](CHANGELOG.md)） |

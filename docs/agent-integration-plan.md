@@ -67,7 +67,7 @@
 | **SDK** | `src/robot_sdk_mcp/`（**新建，第 11 个包**） | 一个 stdio MCP server：`Robot` 生命周期 + 11 个工具 + 结构化错误翻译 |
 | SDK | `docs/agent-integration-plan.md` | 本文 |
 | **Walle** | `~/walle/.agent/mcp.yaml` | 注册 `robot` 这个 MCP server（**零改动 Walle 核心代码**） |
-| Walle | `~/walle/.agent/agents/robot_operator.md` | 专职 Agent：低温度 + 工具面收窄到 `mcp_robot_*` |
+| Walle | `~/walle/.agent/agents/robot_operator.md` | 专职 Agent：低温度 + 工具面收窄到 `mcp_robot_*`（用 `walle-cli --agent robot_operator` 选它，见 [`docs/agent-usage.md`](agent-usage.md)） |
 | Walle | `~/walle/.agent/skills/robot-operating/SKILL.md` | 操作 playbook（先看状态、运动前预检、失败码处理） |
 | Walle | `~/walle/conf.yaml` | 审批规则 + 工具超时覆盖 |
 
