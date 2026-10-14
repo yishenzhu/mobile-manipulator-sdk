@@ -126,10 +126,12 @@ python3 $(ros2 pkg prefix robot_sdk_py)/share/robot_sdk_py/python/demo_navigatio
 ## 跑测试
 
 ```bash
-colcon test                                   # 全量
-colcon test --packages-select robot_sdk_tests  # 跨包验收探针
-colcon test-result --verbose
+./scripts/run_tests.sh                        # 全量：跑完按时间戳留档结果，并直接打出失败的测试名
+./scripts/run_tests.sh --packages-select robot_sdk_tests   # 跨包验收探针
 ```
+
+裸 `colcon test` 能用，但**一轮通过的重跑会覆盖掉上一轮失败的证据** —— 这个仓库里的探针按时序判定，
+偶发失败极难复现，所以统一走脚本（细节见脚本头部注释）。
 
 `robot_sdk_tests` 里的探针是**行为验收**（忙时拒收、取消、限位、避障预检、加速度、真栈解姿态），
 不是单元测试。mock 由 fixture 自己起 —— **不用另开终端**。详见
@@ -174,6 +176,7 @@ colcon test-result --verbose
 | **怎么让 Agent（Walle）用自然语言驱动机器人** | [`docs/agent-integration-plan.md`](docs/agent-integration-plan.md)（计划 + 实测；`robot_sdk_mcp` 的用法见其 README） |
 | **一个真实的生命周期 bug：句柄的引用环**（含 LSan / TSan 实测数字） | [`docs/action-handle-lifetime.md`](docs/action-handle-lifetime.md) |
 | **QoS 契约：订阅用什么、不兼容为什么是静默的、怎么改** | [`docs/qos.md`](docs/qos.md) |
+| **Python 侧性能：缓存读 4.3 µs（含属性访问）、动作 ≥20 ms 由谁决定、GIL 到底放开没有** | [`docs/performance.md`](docs/performance.md)（`./scripts/run_bench.sh` 一条命令复现） |
 
 还没建立全局印象时，先看 [`docs/file-map.md`](docs/file-map.md)：它按包列出**每个文件干什么**，
 并把包之间的调用关系画成图。
