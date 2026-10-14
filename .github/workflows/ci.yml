@@ -32,6 +32,11 @@ jobs:
 
       - uses: actions/checkout@v4
 
+      # 最便宜的一关先跑：纯文本检查，不用装依赖、不用构建 —— 破坏性改动在这里就红，
+      # 不必等 2 分钟构建完。政策见 docs/contract.md。
+      - name: 契约检查（版本一致 + 接口只增不删）
+        run: python3 scripts/check_contract.py
+
       - name: 装依赖（rosdep）
         run: |
           rosdep init || true          # 镜像里可能已经 init 过
