@@ -31,12 +31,14 @@ import sys
 import xml.etree.ElementTree as ET
 
 bad = []
+total = 0
 for path in sorted(glob.glob(sys.argv[1] + "/*.xml")):
     try:
         root = ET.parse(path).getroot()
     except ET.ParseError:
         continue
     for case in root.iter("testcase"):
+        total += 1
         node = case.find("failure") if case.find("failure") is not None else case.find("error")
         if node is not None:
             first = (node.get("message") or "").splitlines()[0][:160]
@@ -45,6 +47,7 @@ for path in sorted(glob.glob(sys.argv[1] + "/*.xml")):
 for cls, name, msg in bad:
     print(f"  FAILED  {cls}::{name}")
     print(f"          {msg}")
+print(f"  用例数 {total}（留档只收用例级 XML —— colcon 那句 Summary 会把 ctest 的汇总项也算进去，虚增）")
 print(f"  结果留档: {sys.argv[1]}")
 print("  全部通过" if not bad else f"  {len(bad)} 个失败（已按时间戳留档）")
 PY

@@ -89,6 +89,9 @@ if(BUILD_TESTING)
     # QoS 的字符串→枚举映射 + "默认值就是文档契约"这两条都在这里
     ament_add_gtest(test_subscription_qos test/test_subscription_qos.cpp)
     target_link_libraries(test_subscription_qos robot_sdk_core)
+    # 三种"收不到"给三种答案：不兼容 / 没发布端 / 兼容但没数据（docs/qos.md §6 的回归测试）
+    ament_add_gtest(test_qos_diagnosis test/test_qos_diagnosis.cpp)
+    target_link_libraries(test_qos_diagnosis robot_sdk_core)
     ament_add_gtest(test_navigation_api test/test_navigation_api.cpp)
     target_link_libraries(test_navigation_api robot_sdk_core)
     ament_add_gtest(test_motion_api test/test_motion_api.cpp)
