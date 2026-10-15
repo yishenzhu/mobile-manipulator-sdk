@@ -30,10 +30,12 @@ def test_config_defaults_match_cpp():
 def test_sub_configs_are_writable():
     config = robot_sdk.RobotConfig()
     config.motion.joint_names = ["a", "b"]
-    config.navigation.goal_tolerance_m = 0.25
+    config.limits.goal_tolerance_m = 0.25
+    config.navigation.arrival_tolerance_m = 0.4
     config.status.default_timeout_s = 7.5
     assert config.motion.joint_names == ["a", "b"]
-    assert config.navigation.goal_tolerance_m == pytest.approx(0.25)
+    assert config.limits.goal_tolerance_m == pytest.approx(0.25)
+    assert config.navigation.arrival_tolerance_m == pytest.approx(0.4)
     assert config.status.default_timeout_s == pytest.approx(7.5)
 
 

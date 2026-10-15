@@ -36,14 +36,8 @@ constexpr double kBatteryVoltagePerPercent = 0.05;
 // 导航：反馈不必跟控制同频 —— 50 Hz 的控制回路配 10 Hz 的反馈，
 // 客户足够看清进度，又不会被刷爆。
 constexpr int kFeedbackEveryNTicks = 5;
-// 客户没给 max_speed（或给了 <= 0）时用的默认速度。
-constexpr double kDefaultMaxSpeedMps = 0.5;
-// avoid_obstacles 用的车身余量：朝目标看出去，离墙比"剩余距离"还近这么多，就别往前开了。
-constexpr double kRobotClearanceM = 0.3;
-
-// 关节运动的到位容差（弧度 / 米），以及客户没给 max_velocity 时的默认值。
-constexpr double kJointTolerance = 0.01;
-constexpr double kDefaultJointVelocity = 0.5;
+// 以上"机器人属性"（到位容差 / 速度上限 / 车身余量）都在 RobotConfig::limits 里，由执行侧读取。
+// 留在这里的都是**仿真自己的真值**（控制周期、轮半径、反馈分频、电量模型）。
 
 // 传感器：控制回路 50 Hz → 传感器 10 Hz。
 constexpr int kSensorEveryNTicks = 5;
@@ -388,7 +382,10 @@ void MockRobotNode::navTick() {
       mutex_, nav_.slot,
       [this](std::lock_guard<std::mutex> &lock) -> TickOutput<NavigateToPose> {
         const double remaining = distance(pose_, nav_.target);
-        if (remaining <= config_.navigation.goal_tolerance_m) {
+        // ⚠️ 必须**同时**看朝向：只判 xy 的话，"原地转身"（xy 没变）会被当成已到达 ⇒ 一步跳到位。
+        const double yaw_error = std::abs(normalizeAngle(nav_.target.yaw - pose_.yaw));
+        if (remaining <= config_.limits.goal_tolerance_m &&
+            yaw_error <= config_.limits.yaw_tolerance_rad) {
           pose_ = nav_.target; // 对齐，免得留下毫米级残差
           auto result = std::make_shared<NavigateToPose::Result>();
           result->success = true;
@@ -403,7 +400,7 @@ void MockRobotNode::navTick() {
           const double wall = rayToBox(pose_.x, pose_.y, kLaserOffsetZ,
                                        (nav_.target.x - pose_.x) / remaining,
                                        (nav_.target.y - pose_.y) / remaining, 0.0);
-          if (wall < remaining + kRobotClearanceM) {
+          if (wall < remaining + config_.limits.body_clearance_m) {
             auto result = std::make_shared<NavigateToPose::Result>();
             result->success = false;
             result->final_distance_error = static_cast<float>(remaining);
@@ -413,10 +410,20 @@ void MockRobotNode::navTick() {
         }
 
         // 朝目标走一步，并把朝向转向目标（模拟一个会转头的前进底盘）。
-        const double step = std::min(nav_.max_speed * kControlPeriodS, remaining);
-        pose_.x += step * (nav_.target.x - pose_.x) / remaining;
-        pose_.y += step * (nav_.target.y - pose_.y) / remaining;
-        pose_.yaw = std::atan2(nav_.target.y - pose_.y, nav_.target.x - pose_.x);
+        // ⚠️ remaining 可能为 0（原地转身时位置没动）：拿它做除数会 0/0=NaN，把 pose 毒死，
+        // 之后每一帧 TF 全是 NaN（RViz 直接丢弃 ⇒ 模型/轮子全红）。所以两种推进都要判。
+        const double want =
+            remaining > 1e-9
+                ? std::atan2(nav_.target.y - pose_.y, nav_.target.x - pose_.x)
+                : nav_.target.yaw; // 位置已到：转成目标朝向
+        const double max_turn = config_.limits.max_yaw_rate * kControlPeriodS;
+        pose_.yaw = normalizeAngle(
+            pose_.yaw + std::clamp(normalizeAngle(want - pose_.yaw), -max_turn, max_turn));
+        if (remaining > 1e-9) { // 位置还没到才平移
+          const double step = std::min(nav_.max_speed * kControlPeriodS, remaining);
+          pose_.x += step * (nav_.target.x - pose_.x) / remaining;
+          pose_.y += step * (nav_.target.y - pose_.y) / remaining;
+        }
 
         if (++nav_.feedback_divider >= kFeedbackEveryNTicks) {
           nav_.feedback_divider = 0;
@@ -450,8 +457,15 @@ MockRobotNode::handleNavGoal(const rclcpp_action::GoalUUID & /*uuid*/,
       nav_.slot.reserve();
       nav_.feedback_divider = 0;
       nav_.target = toPose2D(goal->target_pose);
-      nav_.max_speed =
-          goal->max_speed > 0.0f ? goal->max_speed : kDefaultMaxSpeedMps;
+      // 本次请求 vs 能力上限：客户没给就取上限；给了也不能超过上限 ——
+      // 约束是**执行侧**的责任（SDK 只转发意图）。超了要说一声，免得客户以为按 5 m/s 在跑。
+      const double requested = goal->max_speed > 0.0f ? goal->max_speed
+                                                     : config_.limits.max_speed;
+      if (requested > config_.limits.max_speed) {
+        RCLCPP_WARN(get_logger(), "请求速度 %.2f 超过能力上限 %.2f，按上限执行", requested,
+                    config_.limits.max_speed);
+      }
+      nav_.max_speed = std::min(requested, config_.limits.max_speed);
       nav_.avoid_obstacles = goal->avoid_obstacles;
     }
   }
@@ -568,7 +582,7 @@ void MockRobotNode::motionTick() {
           worst = std::max(worst, std::abs(motion_.target[i] - joint_positions_[i]));
         }
 
-        if (worst <= kJointTolerance) {
+        if (worst <= config_.limits.joint_tolerance) {
           joint_positions_ = motion_.target; // 对齐，免得留下残差
           auto result = std::make_shared<MoveToJointPositions::Result>();
           result->success = true;
@@ -637,7 +651,8 @@ rclcpp_action::GoalResponse MockRobotNode::handleMotionGoal(
       if (!unknown && out_of_range.empty()) {
         motion_.target = std::move(target);
         motion_.max_velocity =
-            goal->max_velocity > 0.0f ? goal->max_velocity : kDefaultJointVelocity;
+            goal->max_velocity > 0.0f ? goal->max_velocity
+                                      : config_.limits.default_joint_velocity;
         // <= 0 表示"由后端决定" —— 对模拟器就是不限加速度。
         motion_.max_acceleration = goal->max_acceleration;
         // reserve() 只置"占位"相位（理由同 handleNavGoal），并清掉残留的取消请求。

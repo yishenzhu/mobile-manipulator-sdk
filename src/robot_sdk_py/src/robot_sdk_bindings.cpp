@@ -327,8 +327,10 @@ PYBIND11_MODULE(_robot_sdk, m) {
       .def_readwrite("global_frame", &NavigationConfig::global_frame)
       .def_readwrite("base_frame", &NavigationConfig::base_frame)
       .def_readwrite("default_timeout_s", &NavigationConfig::default_timeout_s)
-      .def_readwrite("goal_tolerance_m", &NavigationConfig::goal_tolerance_m)
-      .def_readwrite("server_wait_timeout_s", &NavigationConfig::server_wait_timeout_s);
+      .def_readwrite("server_wait_timeout_s", &NavigationConfig::server_wait_timeout_s)
+      .def_readwrite("arrival_tolerance_m", &NavigationConfig::arrival_tolerance_m)
+      .def_readwrite("arrival_yaw_tolerance_rad",
+                     &NavigationConfig::arrival_yaw_tolerance_rad);
 
   py::class_<MotionConfig>(m, "MotionConfig")
       .def(py::init<>())
@@ -371,6 +373,18 @@ PYBIND11_MODULE(_robot_sdk, m) {
       .def_readwrite("joint_states", &QosConfig::joint_states)
       .def_readwrite("status", &QosConfig::status);
 
+  py::class_<RobotLimitsConfig>(m, "RobotLimitsConfig",
+                                "机器人自己的属性（到位判据 / 能力上限），由执行侧使用。")
+      .def(py::init<>())
+      .def_readwrite("goal_tolerance_m", &RobotLimitsConfig::goal_tolerance_m)
+      .def_readwrite("yaw_tolerance_rad", &RobotLimitsConfig::yaw_tolerance_rad)
+      .def_readwrite("max_speed", &RobotLimitsConfig::max_speed)
+      .def_readwrite("max_yaw_rate", &RobotLimitsConfig::max_yaw_rate)
+      .def_readwrite("joint_tolerance", &RobotLimitsConfig::joint_tolerance)
+      .def_readwrite("default_joint_velocity",
+                     &RobotLimitsConfig::default_joint_velocity)
+      .def_readwrite("body_clearance_m", &RobotLimitsConfig::body_clearance_m);
+
   py::class_<RobotConfig>(m, "RobotConfig", "一个 Robot 的全部配置。")
       // 只给三个标量开构造参数（子配置字段多、名字也长，用属性赋值更清楚）。
       .def(py::init([](std::string node_name, std::string node_namespace, bool use_sim_time) {
@@ -389,6 +403,7 @@ PYBIND11_MODULE(_robot_sdk, m) {
       .def_readwrite("motion", &RobotConfig::motion)
       .def_readwrite("perception", &RobotConfig::perception)
       .def_readwrite("status", &RobotConfig::status)
+      .def_readwrite("limits", &RobotConfig::limits)
       .def_readwrite("qos", &RobotConfig::qos);
 
   // ── 目标（客户给进去的）──

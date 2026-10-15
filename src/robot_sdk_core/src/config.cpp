@@ -75,8 +75,11 @@ RobotConfig RobotConfig::fromNode(rclcpp::Node &node) {
       node, "navigation.base_frame", cfg.navigation.base_frame);
   cfg.navigation.default_timeout_s = declareAndGet<double>(
       node, "navigation.default_timeout_s", cfg.navigation.default_timeout_s);
-  cfg.navigation.goal_tolerance_m = declareAndGet<double>(
-      node, "navigation.goal_tolerance_m", cfg.navigation.goal_tolerance_m);
+  cfg.navigation.arrival_tolerance_m = declareAndGet<double>(
+      node, "navigation.arrival_tolerance_m", cfg.navigation.arrival_tolerance_m);
+  cfg.navigation.arrival_yaw_tolerance_rad =
+      declareAndGet<double>(node, "navigation.arrival_yaw_tolerance_rad",
+                            cfg.navigation.arrival_yaw_tolerance_rad);
   cfg.navigation.server_wait_timeout_s =
       declareAndGet<double>(node, "navigation.server_wait_timeout_s",
                             cfg.navigation.server_wait_timeout_s);
@@ -123,6 +126,22 @@ RobotConfig RobotConfig::fromNode(rclcpp::Node &node) {
       node, "status.get_status_service", cfg.status.get_status_service);
   cfg.status.default_timeout_s = declareAndGet<double>(
       node, "status.default_timeout_s", cfg.status.default_timeout_s);
+
+  // 机器人侧属性：由执行侧（真机驱动 / 仿真器）使用，SDK 客户端不读。
+  cfg.limits.goal_tolerance_m = declareAndGet<double>(
+      node, "limits.goal_tolerance_m", cfg.limits.goal_tolerance_m);
+  cfg.limits.yaw_tolerance_rad = declareAndGet<double>(
+      node, "limits.yaw_tolerance_rad", cfg.limits.yaw_tolerance_rad);
+  cfg.limits.max_speed = declareAndGet<double>(
+      node, "limits.max_speed", cfg.limits.max_speed);
+  cfg.limits.max_yaw_rate = declareAndGet<double>(
+      node, "limits.max_yaw_rate", cfg.limits.max_yaw_rate);
+  cfg.limits.joint_tolerance = declareAndGet<double>(
+      node, "limits.joint_tolerance", cfg.limits.joint_tolerance);
+  cfg.limits.default_joint_velocity = declareAndGet<double>(
+      node, "limits.default_joint_velocity", cfg.limits.default_joint_velocity);
+  cfg.limits.body_clearance_m = declareAndGet<double>(
+      node, "limits.body_clearance_m", cfg.limits.body_clearance_m);
 
   // 传输层 QoS：集中在这里，参数名按角色展开（与结构体路径一致）。
   cfg.qos.sensor = SubscriptionQos::fromNode(node, "qos.sensor");

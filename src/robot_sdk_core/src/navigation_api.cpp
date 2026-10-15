@@ -1,6 +1,7 @@
 #include "robot_sdk/navigation_api.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <memory>
 #include <string>
 #include <utility>
@@ -97,7 +98,27 @@ Result<NavigationResult> NavigationAPI::goTo(const NavigationGoal &goal) {
   if (!wrapped.ok()) {
     return wrapped.error();
   }
-  return toResult(wrapped.value());
+  auto result = toResult(wrapped.value());
+
+  // 兑现头文件里那句承诺：success 要是我们**核过**的，不是照抄服务端的自称。
+  // 读不回位姿就不改判 —— 不能因为一次查询失败把已经成功的动作判死。
+  if (result.success) {
+    auto pose = currentPose(std::chrono::duration<double>(config_.server_wait_timeout_s));
+    if (pose.ok()) {
+      const double distance =
+          std::hypot(pose.value().x - goal.target.x, pose.value().y - goal.target.y);
+      const double yaw_error =
+          std::abs(normalizeAngle(pose.value().yaw - goal.target.yaw));
+      if (distance > config_.arrival_tolerance_m ||
+          yaw_error > config_.arrival_yaw_tolerance_rad) {
+        result.success = false;
+        result.message = "reported success but actual pose is off: distance " +
+                         std::to_string(distance) + " m, yaw " +
+                         std::to_string(yaw_error) + " rad";
+      }
+    }
+  }
+  return result;
 }
 
 Result<Pose2D>

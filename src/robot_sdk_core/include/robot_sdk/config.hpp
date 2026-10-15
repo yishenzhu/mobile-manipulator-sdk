@@ -22,8 +22,12 @@ struct NavigationConfig {
   // 也用这个帧，保持全项目一致。
   std::string base_frame{"base_footprint"};
   double default_timeout_s{60.0};
-  double goal_tolerance_m{0.05};
   double server_wait_timeout_s{5.0};
+  /// 客户端**验收**判据：goTo() 拿到 result 后读回位姿自己核对，超差即把 success 判 false。
+  /// ⚠️ 必须**比后端自己的到位容差更宽**（Nav2 默认 xy 0.15 / yaw 0.25）—— 验收是兜底，
+  ///    只抓"离得很远却报成功"，比后端更严就会把正常结果误判成失败。
+  double arrival_tolerance_m{0.25};
+  double arrival_yaw_tolerance_rad{0.35};
 };
 
 struct MotionConfig {
@@ -93,6 +97,26 @@ struct QosConfig {
   SubscriptionQos status{1, "reliable"};
 };
 
+/// **机器人自己的属性**（不是 SDK 的使用参数）：到位判据与运动能力上限。
+/// 由**执行侧**（真机驱动 / 仿真器）读出来用；SDK 客户端只发意图，不替机器人判断"到了没有"。
+/// ⚠️ 别把这些搬回 NavigationConfig：同一个概念两处各存一份，迟早漂移（同 MotionConfig 的说明）。
+struct RobotLimitsConfig {
+  /// 位置到位判据（服务端判断"我到了"的阈值）。
+  double goal_tolerance_m{0.05};
+  /// 朝向到位判据。
+  double yaw_tolerance_rad{0.05};
+  /// 底盘线/角速度**能力上限**（成对）。与 `NavigationGoal::max_speed`（本次请求）是两层：
+  /// 请求归调用方，上限归机器人，执行侧取 min。
+  double max_speed{0.5};
+  double max_yaw_rate{1.5};
+  /// 关节到位容差（弧度 / 米），执行侧判"到位"用。
+  double joint_tolerance{0.01};
+  /// 客户没给 `max_velocity` 时的**默认**关节速度（不是上限 —— 上限在 URDF 的关节 limit 里）。
+  double default_joint_velocity{0.5};
+  /// 避障预检的车身余量：朝目标看出去，离墙比"剩余距离"还近这么多就不往前开。
+  double body_clearance_m{0.3};
+};
+
 struct RobotConfig {
   /// 自建节点时用的**节点名**。
   std::string node_name{"robot_sdk"};
@@ -106,6 +130,8 @@ struct RobotConfig {
   MotionConfig motion{};
   PerceptionConfig perception{};
   StatusConfig status{};
+  /// 机器人侧属性（服务端用；SDK 客户端不读）。
+  RobotLimitsConfig limits{};
   /// 传输层的 QoS 集中在这一处；各 API 由 Robot 装配时按角色取用。
   QosConfig qos{};
 
