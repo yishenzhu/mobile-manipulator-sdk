@@ -1,4 +1,7 @@
 #include "robot_sdk/detail/joint_wrap.hpp"
+
+#include <fstream>
+#include <sstream>
 #include "robot_sdk_sim/mock_robot_node.hpp"
 #include "robot_sdk_sim/tick_action.hpp"
 
@@ -17,6 +20,8 @@ namespace {
 
 // 三个定时器的周期：控制最密（50 Hz），状态次之（10 Hz）。
 constexpr double kControlPeriodS = 0.02;
+// 轮子半径（与 URDF 的 wheel_radius 对齐）：只用来把位移折算成轮子转角。
+constexpr double kWheelRadius = 0.055;
 constexpr double kStatusPeriodS = 0.1;
 
 // 电量模拟：不充电时缓慢下降，低于 10% 自动进入充电，充满后停止。
@@ -205,6 +210,25 @@ MockRobotNode::MockRobotNode(const rclcpp::NodeOptions &options)
   point_cloud_pub_ = create_publisher<sensor_msgs::msg::PointCloud2>(
       config_.perception.point_cloud_topic, sensor_qos);
 
+  // 3D 模型的数据源。此前**没人发它** —— 于是 RViz 里看得见网格与传感器、
+  // 看不见机器人本体。transient_local 与 robot_state_publisher 同一约定：
+  // 迟到的订阅者（后开的 RViz）也能拿到；⚠️ 订阅端也必须请求 Transient Local。
+  description_pub_ = create_publisher<std_msgs::msg::String>(
+      "robot_description", rclcpp::QoS(1).transient_local());
+  if (!urdf.empty()) {
+    std::ifstream file(urdf);
+    std::stringstream buffer;
+    buffer << file.rdbuf();
+    if (file) {
+      std_msgs::msg::String description;
+      description.data = buffer.str();
+      description_pub_->publish(description);
+    } else {
+      RCLCPP_WARN(get_logger(), "读不到 URDF 文件 %s —— RViz 里看不到机器人本体",
+                  urdf.c_str());
+    }
+  }
+
   tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
   static_tf_broadcaster_ =
       std::make_unique<tf2_ros::StaticTransformBroadcaster>(*this);
@@ -244,8 +268,13 @@ MockRobotNode::MockRobotNode(const rclcpp::NodeOptions &options)
           response->joint_states.header.stamp = status.header.stamp;
           response->joint_states.name = joint_names_;
           response->joint_states.position = joint_positions_;
-          response->joint_states.velocity.assign(joint_names_.size(), 0.0);
-          response->joint_states.effort.assign(joint_names_.size(), 0.0);
+          // 与 /joint_states 一致：轮子也报（否则两条路径的关节表不一样）
+          response->joint_states.name.push_back("left_wheel_joint");
+          response->joint_states.name.push_back("right_wheel_joint");
+          response->joint_states.position.push_back(wheel_angle_);
+          response->joint_states.position.push_back(wheel_angle_);
+          response->joint_states.velocity.assign(response->joint_states.name.size(), 0.0);
+          response->joint_states.effort.assign(response->joint_states.name.size(), 0.0);
         }
       },
       rclcpp::ServicesQoS(), service_group_);
@@ -739,8 +768,19 @@ void MockRobotNode::publishJoints(const rclcpp::Time &stamp) {
     std::lock_guard<std::mutex> lock(mutex_);
     msg.name = joint_names_;
     msg.position = joint_positions_;
-    msg.velocity.assign(joint_names_.size(), 0.0);
-    msg.effort.assign(joint_names_.size(), 0.0);
+    // 轮子也要上报：`robot_state_publisher` 只对 /joint_states 里出现过的**可动**关节发 TF，
+    // 而底盘位置是这个节点自己广播的 —— 不补这两项，RViz 就找不到 left/right_wheel_link。
+    // 转角由位姿增量折算（差速底盘看不出左右差，够 RViz 用）。
+    const double travelled =
+        std::hypot(pose_.x - last_wheel_pose_.x, pose_.y - last_wheel_pose_.y);
+    wheel_angle_ += travelled / kWheelRadius;
+    last_wheel_pose_ = pose_;
+    msg.name.push_back("left_wheel_joint");
+    msg.name.push_back("right_wheel_joint");
+    msg.position.push_back(wheel_angle_);
+    msg.position.push_back(wheel_angle_);
+    msg.velocity.assign(msg.name.size(), 0.0);
+    msg.effort.assign(msg.name.size(), 0.0);
   }
   joint_pub_->publish(msg);
 }

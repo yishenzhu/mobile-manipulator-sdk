@@ -1,8 +1,9 @@
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.conditions import IfCondition
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import Command, LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 
 
@@ -14,6 +15,16 @@ def generate_launch_description():
         [
             DeclareLaunchArgument("namespace", default_value=""),
             DeclareLaunchArgument("use_sim_time", default_value="false"),
+            DeclareLaunchArgument(
+                "robot_description_file",
+                default_value=PathJoinSubstitution(
+                    [FindPackageShare("robot_description"), "urdf", "mobile_manipulator.urdf"]
+                ),
+                description=(
+                    "机器人描述：限位/折角由它决定，RViz 的 3D 模型也订它。"
+                    "不给 ⇒ 不判限位、也看不到机器人本体。"
+                ),
+            ),
             DeclareLaunchArgument(
                 "rviz",
                 default_value="false",
@@ -27,6 +38,41 @@ def generate_launch_description():
                 output="screen",
                 parameters=[
                     {
+                        "use_sim_time": LaunchConfiguration("use_sim_time"),
+                        # ⚠️ 必须传：不传就没有限位、也没有 /robot_description。
+                        # tests 的 fixture 一直是手动传的，走 launch 反而漏了（两处行为不一致）。
+                        "robot_description_file": LaunchConfiguration(
+                            "robot_description_file"
+                        ),
+                    }
+                ],
+            ),
+            # ★ 机器人本体各 link 的 TF 由它发（读 URDF + /joint_states）。
+            #   没有它，RViz 只会看到 map/odom/base_footprint 与传感器那几个静态帧，
+            #   手臂每根连杆都报 "No transform from [x] to [map]"（实测）。
+            #   ⚠️ 它只发 URDF 里的 link 帧，不动 mock 自己广播的世界帧。
+            Node(
+                package="robot_state_publisher",
+                executable="robot_state_publisher",
+                name="robot_state_publisher",
+                output="screen",
+                parameters=[
+                    {
+                        "robot_description": ParameterValue(
+                            Command(
+                                [
+                                    "cat ",
+                                    PathJoinSubstitution(
+                                        [
+                                            FindPackageShare("robot_description"),
+                                            "urdf",
+                                            "mobile_manipulator.urdf",
+                                        ]
+                                    ),
+                                ]
+                            ),
+                            value_type=str,
+                        ),
                         "use_sim_time": LaunchConfiguration("use_sim_time"),
                     }
                 ],

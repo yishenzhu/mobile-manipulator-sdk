@@ -17,6 +17,8 @@
     <depend>geometry_msgs</depend>
     <depend>sensor_msgs</depend>
     <depend>tf2_ros</depend>
+    <depend>robot_state_publisher</depend>
+    <depend>robot_description</depend>
     <depend>control_msgs</depend>
     <depend>trajectory_msgs</depend>
     <depend>robot_sdk_interfaces</depend>

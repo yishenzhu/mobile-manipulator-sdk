@@ -38,7 +38,7 @@ class Probe(Node):
         self.fk_client = self.create_client(GetPositionFK, "/compute_fk")
         self.sv_client = self.create_client(GetStateValidity, "/check_state_validity")
 
-    def wait(self, future, timeout=120.0):
+    def wait(self, future, timeout=240.0):
         # 必须带超时：`spin_until_future_complete` 超时后返回，但 `result()` 是阻塞的。
         rclpy.spin_until_future_complete(self, future, timeout_sec=timeout)
         if not future.done():

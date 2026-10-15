@@ -46,7 +46,9 @@ class MoveItAdapter : public rclcpp::Node {
     position_tolerance_ = declare_parameter<double>("position_tolerance", 0.01);
     orientation_tolerance_ = declare_parameter<double>("orientation_tolerance", 0.05);
     planning_attempts_ = declare_parameter<int>("planning_attempts", 3);
-    planning_time_s_ = declare_parameter<double>("planning_time_s", 5.0);
+    // 5.0 秒在负载下不够：换成 UR5 之后规划更难，OMPL 会在 5 秒处超时（实测正好 5.00 s），
+    // 表现为 planning failure。放宽到 20 秒。
+    planning_time_s_ = declare_parameter<double>("planning_time_s", 20.0);
 
     server_group_ = create_callback_group(rclcpp::CallbackGroupType::Reentrant);
     client_group_ = create_callback_group(rclcpp::CallbackGroupType::Reentrant);
@@ -365,7 +367,7 @@ class MoveItAdapter : public rclcpp::Node {
   double position_tolerance_ = 0.01;
   double orientation_tolerance_ = 0.05;
   int planning_attempts_ = 3;
-  double planning_time_s_ = 5.0;
+  double planning_time_s_ = 20.0;
 
   rclcpp::CallbackGroup::SharedPtr server_group_;
   rclcpp::CallbackGroup::SharedPtr client_group_;

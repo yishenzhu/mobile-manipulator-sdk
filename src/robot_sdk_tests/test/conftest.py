@@ -20,12 +20,20 @@ import pytest
 import rclpy
 import tf2_ros
 from ament_index_python.packages import get_package_prefix, get_package_share_directory
+from control_msgs.action import FollowJointTrajectory
 from controller_manager_msgs.srv import ListControllers
 from lifecycle_msgs.srv import GetState
 from rclpy.action import ActionClient
+from rclpy.duration import Duration
 from sensor_msgs.msg import JointState
+from trajectory_msgs.msg import JointTrajectoryPoint
 
 from robot_sdk_interfaces.action import MoveToJointPositions, MoveToPose, NavigateToPose
+
+# 手臂的 6 个关节（顺序 = 归位轨迹与 SRDF 的顺序），以及"朝上折"的正常位姿。
+ARM_JOINTS = ("shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint",
+              "wrist_joint", "wrist_pitch_joint", "wrist_roll_joint")
+READY_POSE = (0.0, -0.6, 1.4, 0.0, 0.0, 0.0)
 
 ADAPTER_POSE = "/sdk/move_to_pose"
 
@@ -119,6 +127,28 @@ def real_stack():
                     pass
             assert ok, \
                 f"TF 上查不到 base_footprint→gripper_base_link（日志：{log.name}）"
+
+            # 就绪判据③：把手臂摆到**正常位姿**再交给测试。
+            # 为什么：UR5 的零位是"水平横躺"（真机也是这样），从那里出发要绕过基座与底盘，
+            # 是整条链路上**最难的一步** —— 而它被当成了默认起点，规划因此卡在超时边缘。
+            # ⚠️ 这里**直接发轨迹给控制器**，不经 MoveIt：走 MoveIt 就又要规划一次，
+            #    等于把同一个难题搬进 fixture。
+            traj = ActionClient(node, FollowJointTrajectory, "/arm_controller/follow_joint_trajectory")
+            assert traj.wait_for_server(timeout_sec=30.0), \
+                f"等不到 arm_controller 的轨迹接口（日志：{log.name}）"
+            ready = FollowJointTrajectory.Goal()
+            ready.trajectory.joint_names = list(ARM_JOINTS)
+            point = JointTrajectoryPoint()
+            point.positions = READY_POSE          # 朝上折：远离基座与底盘
+            point.time_from_start = Duration(seconds=3.0).to_msg()
+            ready.trajectory.points = [point]
+            goal_future = traj.send_goal_async(ready)
+            rclpy.spin_until_future_complete(node, goal_future, timeout_sec=30.0)
+            assert goal_future.done() and goal_future.result() and goal_future.result().accepted, \
+                "归位的轨迹目标没被接受"
+            rclpy.spin_until_future_complete(
+                node, goal_future.result().get_result_async(), timeout_sec=30.0)
+            time.sleep(0.5)
         finally:
             rclpy.shutdown()
 

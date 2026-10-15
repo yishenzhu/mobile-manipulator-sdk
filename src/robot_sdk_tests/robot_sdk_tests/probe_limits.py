@@ -14,16 +14,31 @@ SDK 不替它做（SDK 是硬件无关的，两处各存一份规则迟早漂移
     pytest src/robot_sdk_tests/test/test_probes.py -s -k limits
 """
 
+import os
+import xml.etree.ElementTree as ET
+
 import rclpy
 from rclpy.action import ActionClient
 from rclpy.node import Node
+from ament_index_python.packages import get_package_share_directory
 
 from robot_sdk_interfaces.action import MoveToJointPositions
 
 JOINT = "shoulder_lift_joint"
-LIMIT = 1.8      # 和 robot_description 里那份 URDF 对齐（改 URDF 就得改这里）
-INSIDE = 1.5
-OUTSIDE = 5.0
+
+
+def joint_limit(joint_name=JOINT):
+    """从 robot_description 的 URDF 里读这个关节的限位 —— 改 URDF 不用改这里。
+
+    原来是硬编码 1.8，换机器人（UR5 的 shoulder_lift 是 ±360°）之后探针就**假失败**了：
+    5.0 变成合规被接受，紧接着那条 1.5 又被"忙时拒收"挡回来，报出来像是限位判断错了。
+    """
+    path = os.path.join(get_package_share_directory("robot_description"),
+                        "urdf", "mobile_manipulator.urdf")
+    for joint in ET.parse(path).getroot().iter("joint"):
+        if joint.get("name") == joint_name:
+            return float(joint.find("limit").get("upper"))
+    raise AssertionError(f"URDF 里没有关节 {joint_name}")
 
 
 class Probe(Node):
@@ -54,14 +69,17 @@ def check(action_name="/move_to_joint_positions"):
         assert probe.client.wait_for_server(timeout_sec=10.0), \
             f"等不到动作服务端 {action_name}"
 
-        handle = probe.go(OUTSIDE)
-        print(f"  超限 {OUTSIDE}（{JOINT} 的限位是 ±{LIMIT}）→ accepted={handle.accepted}")
-        assert not handle.accepted, f"{OUTSIDE} 超出 ±{LIMIT}，目标不该被接受"
+        limit = joint_limit()
+        outside, inside = limit * 1.15, limit * 0.5
 
-        handle = probe.go(INSIDE)
-        assert handle.accepted, f"{INSIDE} 在限位内，目标该被接受"
+        handle = probe.go(outside)
+        print(f"  超限 {outside:.2f}（{JOINT} 的限位是 ±{limit}）→ accepted={handle.accepted}")
+        assert not handle.accepted, f"{outside} 超出 ±{limit}，目标不该被接受"
+
+        handle = probe.go(inside)
+        assert handle.accepted, f"{inside} 在限位内，目标该被接受"
         result = probe.wait(handle.get_result_async()).result
-        print(f"  合规 {INSIDE} → success={result.success}  '{result.message}'")
+        print(f"  合规 {inside:.2f} → success={result.success}")
         assert result.success, "限位内的目标该能走到"
         print("✅ 超限被拒、合规放行")
     finally:

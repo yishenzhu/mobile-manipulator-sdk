@@ -16,6 +16,7 @@
 #include <sensor_msgs/msg/joint_state.hpp>
 #include <sensor_msgs/msg/laser_scan.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
+#include <std_msgs/msg/string.hpp>
 #include <tf2_ros/static_transform_broadcaster.h>
 #include <tf2_ros/transform_broadcaster.h>
 
@@ -134,6 +135,9 @@ class MockRobotNode : public rclcpp::Node {
   rclcpp::Publisher<sensor_msgs::msg::CameraInfo>::SharedPtr camera_info_pub_;
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr depth_pub_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr point_cloud_pub_;
+  /// 3D 模型的数据源（RViz 的 RobotModel、Foxglove 的 3D 面板都订它）。
+  /// 用 transient_local，与 robot_state_publisher 同一约定：迟到的订阅者也拿得到。
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr description_pub_;
 
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
   std::unique_ptr<tf2_ros::StaticTransformBroadcaster> static_tf_broadcaster_;
@@ -178,6 +182,10 @@ class MockRobotNode : public rclcpp::Node {
     int feedback_divider{0}; ///< 反馈降频：每 N 个控制周期发一条
   };
   MotionJob motion_;
+  /// 轮子累计转角 + 上一拍的位姿（把位移折算成轮子转角用）。
+  double wheel_angle_{0.0};
+  Pose2D last_wheel_pose_{};
+
   std::vector<std::string> joint_names_;
   std::vector<double> joint_positions_;
   /// 从 URDF 读来的关节属性（连续不连续 / 限位 / 速度上限），**按名字索引**。

@@ -24,15 +24,9 @@
   <xacro:property name="wheel_offset_x" value="0.13"/>
   <xacro:property name="wheel_offset_y" value="0.185"/>
 
-  <xacro:property name="arm_base_height" value="0.06"/>
-  <xacro:property name="upper_arm_length" value="0.22"/>
-  <xacro:property name="forearm_length" value="0.20"/>
-  <xacro:property name="wrist_length" value="0.06"/>
   <!-- 腕部后两个自由度各占一小段。arm 组靠它们凑够 **6 个 revolute** ——
        KDL 才能解完整 6 维位姿（少一个就退化成欠自由度，解不出带姿态的目标）。 -->
-  <xacro:property name="wrist_pitch_length" value="0.03"/>
   <xacro:property name="wrist_roll_length" value="0.02"/>
-  <xacro:property name="arm_radius" value="0.035"/>
 
   <!-- ================================ Inertia =============================== -->
   <xacro:macro name="box_inertial" params="mass x y z">
@@ -69,7 +63,7 @@
         <box size="${base_length} ${base_width} ${base_height}"/>
       </geometry>
       <material name="grey">
-        <color rgba="0.35 0.37 0.40 1.0"/>
+        <color rgba="0.10 0.20 0.45 1.0"/>
       </material>
     </visual>
     <collision>
@@ -197,201 +191,236 @@
   </joint>
 
   <!-- =============================== Arm =================================== -->
+  <!-- ═══ 手臂：官方 UR5 ═══════════════════════════════════════════════
+       为什么是"照抄"而不是自己捏：mesh 本身就是按 UR5 的**真实尺寸**做的，
+       几何与 mesh 不一致时模型会在关节处断开。数值来源（本机已装，见 docs/visualization.md）：
+         ur_description/config/ur5/default_kinematics.yaml   ← 6 个关节的 xyz/rpy
+         ur_description/config/ur5/joint_limits.yaml          ← 限位/速度/力矩（已换算成弧度）
+         ur_description/config/ur5/visual_parameters.yaml     ← 每个 link 用哪个 mesh、视觉偏移
+       ⚠️ 名字仍用**我们自己的**（wrist / wrist_pitch / wrist_roll ↔ UR 的 wrist_1/2/3）：
+          这样 SRDF、MoveIt 配置、mock、测试都不用跟着改。 -->
   <link name="arm_base_link">
     <visual>
+      <origin xyz="0 0 0" rpy="0 0 ${PI}"/>
       <geometry>
-        <cylinder radius="0.055" length="${arm_base_height}"/>
+        <mesh filename="package://ur_description/meshes/ur5/visual/base.dae"/>
       </geometry>
-      <material name="orange">
-        <color rgba="0.9 0.45 0.1 1.0"/>
+      <material name="ur_light_grey">
+        <color rgba="0.7 0.7 0.7 1.0"/>
       </material>
     </visual>
     <collision>
+      <origin xyz="0 0 0" rpy="0 0 ${PI}"/>
       <geometry>
-        <cylinder radius="0.055" length="${arm_base_height}"/>
+        <mesh filename="package://ur_description/meshes/ur5/collision/base.stl"/>
       </geometry>
     </collision>
-    <xacro:cylinder_inertial mass="0.6" radius="0.055" length="${arm_base_height}"/>
+    <xacro:cylinder_inertial mass="4.0" radius="0.06" length="0.06"/>
   </link>
-  <joint name="arm_base_joint" type="fixed">
+
+  <!-- 手臂基座：UR5 在零位是**横躺**的，直接装在底盘顶面必然穿模
+       （MoveIt 的碰撞检查当场就会把零位判成自碰撞）。真实移动机械臂都这么抬一段。 -->
+  <link name="arm_pedestal_link">
+    <visual>
+      <origin xyz="0 0 0.25" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.05" length="0.50"/>
+      </geometry>
+      <material name="dark_grey">
+        <color rgba="0.25 0.27 0.30 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.25" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.05" length="0.50"/>
+      </geometry>
+    </collision>
+    <xacro:cylinder_inertial mass="2.2" radius="0.05" length="0.50"/>
+  </link>
+
+  <joint name="arm_pedestal_joint" type="fixed">
     <parent link="base_link"/>
+    <child link="arm_pedestal_link"/>
+    <origin xyz="0 0 ${base_height / 2.0}" rpy="0 0 0"/>
+  </joint>
+
+  <joint name="arm_base_joint" type="fixed">
+    <parent link="arm_pedestal_link"/>
     <child link="arm_base_link"/>
-    <origin xyz="-0.05 0 ${base_height / 2.0 + arm_base_height / 2.0}" rpy="0 0 0"/>
+    <origin xyz="0 0 0.50" rpy="0 0 0"/>
   </joint>
 
   <link name="shoulder_link">
     <visual>
+      <origin xyz="0 0 0" rpy="0 0 ${PI}"/>
       <geometry>
-        <cylinder radius="${arm_radius}" length="0.06"/>
+        <mesh filename="package://ur_description/meshes/ur5/visual/shoulder.dae"/>
       </geometry>
-      <material name="orange">
-        <color rgba="0.9 0.45 0.1 1.0"/>
+      <material name="ur_light_grey">
+        <color rgba="0.7 0.7 0.7 1.0"/>
       </material>
     </visual>
     <collision>
+      <origin xyz="0 0 0" rpy="0 0 ${PI}"/>
       <geometry>
-        <cylinder radius="${arm_radius}" length="0.06"/>
+        <mesh filename="package://ur_description/meshes/ur5/collision/shoulder.stl"/>
       </geometry>
     </collision>
-    <xacro:cylinder_inertial mass="0.4" radius="${arm_radius}" length="0.06"/>
+    <xacro:cylinder_inertial mass="3.7" radius="0.06" length="0.12"/>
   </link>
+
   <joint name="shoulder_pan_joint" type="revolute">
     <parent link="arm_base_link"/>
     <child link="shoulder_link"/>
-    <origin xyz="0 0 ${arm_base_height / 2.0 + 0.03}" rpy="0 0 0"/>
+    <origin xyz="0 0 0.089159" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
-    <limit lower="-3.14" upper="3.14" effort="30.0" velocity="2.0"/>
-    <dynamics damping="0.1" friction="0.0"/>
+    <limit lower="-6.283185307" upper="6.283185307" effort="150.0" velocity="3.14159265"/>
   </joint>
 
   <link name="upper_arm_link">
     <visual>
-      <origin xyz="0 0 ${upper_arm_length / 2.0}" rpy="0 0 0"/>
+      <origin xyz="0 0 0.13585" rpy="${PI / 2.0} 0 ${-PI / 2.0}"/>
       <geometry>
-        <cylinder radius="${arm_radius}" length="${upper_arm_length}"/>
+        <mesh filename="package://ur_description/meshes/ur5/visual/upperarm.dae"/>
       </geometry>
-      <material name="orange">
-        <color rgba="0.9 0.45 0.1 1.0"/>
+      <material name="ur_light_grey">
+        <color rgba="0.7 0.7 0.7 1.0"/>
       </material>
     </visual>
     <collision>
-      <origin xyz="0 0 ${upper_arm_length / 2.0}" rpy="0 0 0"/>
+      <origin xyz="0 0 0.13585" rpy="${PI / 2.0} 0 ${-PI / 2.0}"/>
       <geometry>
-        <cylinder radius="${arm_radius}" length="${upper_arm_length}"/>
+        <mesh filename="package://ur_description/meshes/ur5/collision/upperarm.stl"/>
       </geometry>
     </collision>
-    <xacro:cylinder_inertial mass="0.9" radius="${arm_radius}" length="${upper_arm_length}"/>
+    <xacro:cylinder_inertial mass="8.393" radius="0.054" length="0.4"/>
   </link>
+
   <joint name="shoulder_lift_joint" type="revolute">
     <parent link="shoulder_link"/>
     <child link="upper_arm_link"/>
-    <origin xyz="0 0 0.03" rpy="0 0 0"/>
-    <axis xyz="0 1 0"/>
-    <limit lower="-1.8" upper="1.8" effort="30.0" velocity="2.0"/>
-    <dynamics damping="0.1" friction="0.0"/>
+    <origin xyz="0 0 0" rpy="${PI / 2.0} 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-6.283185307" upper="6.283185307" effort="150.0" velocity="3.14159265"/>
   </joint>
 
   <link name="forearm_link">
     <visual>
-      <origin xyz="0 0 ${forearm_length / 2.0}" rpy="0 0 0"/>
+      <origin xyz="0 0 0.0165" rpy="${PI / 2.0} 0 ${-PI / 2.0}"/>
       <geometry>
-        <cylinder radius="${arm_radius * 0.9}" length="${forearm_length}"/>
+        <mesh filename="package://ur_description/meshes/ur5/visual/forearm.dae"/>
       </geometry>
-      <material name="orange">
-        <color rgba="0.9 0.45 0.1 1.0"/>
+      <material name="ur_light_grey">
+        <color rgba="0.7 0.7 0.7 1.0"/>
       </material>
     </visual>
     <collision>
-      <origin xyz="0 0 ${forearm_length / 2.0}" rpy="0 0 0"/>
+      <origin xyz="0 0 0.0165" rpy="${PI / 2.0} 0 ${-PI / 2.0}"/>
       <geometry>
-        <cylinder radius="${arm_radius * 0.9}" length="${forearm_length}"/>
+        <mesh filename="package://ur_description/meshes/ur5/collision/forearm.stl"/>
       </geometry>
     </collision>
-    <xacro:cylinder_inertial mass="0.7" radius="${arm_radius * 0.9}" length="${forearm_length}"/>
+    <xacro:cylinder_inertial mass="2.33" radius="0.04" length="0.39"/>
   </link>
+
   <joint name="elbow_joint" type="revolute">
     <parent link="upper_arm_link"/>
     <child link="forearm_link"/>
-    <origin xyz="0 0 ${upper_arm_length}" rpy="0 0 0"/>
-    <axis xyz="0 1 0"/>
-    <limit lower="-2.4" upper="2.4" effort="20.0" velocity="2.0"/>
-    <dynamics damping="0.1" friction="0.0"/>
+    <origin xyz="-0.425 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <!-- UR 官方把肘关节人为限制在 ±180°（超过之后肩部会挡住，规划空间会分裂） -->
+    <limit lower="-3.14159265" upper="3.14159265" effort="150.0" velocity="3.14159265"/>
   </joint>
 
   <link name="wrist_link">
     <visual>
-      <origin xyz="0 0 ${wrist_length / 2.0}" rpy="0 0 0"/>
+      <origin xyz="0 0 -0.093" rpy="${PI / 2.0} 0 0"/>
       <geometry>
-        <cylinder radius="${arm_radius * 0.8}" length="${wrist_length}"/>
+        <mesh filename="package://ur_description/meshes/ur5/visual/wrist1.dae"/>
       </geometry>
-      <material name="orange">
-        <color rgba="0.9 0.45 0.1 1.0"/>
+      <material name="ur_light_grey">
+        <color rgba="0.7 0.7 0.7 1.0"/>
       </material>
     </visual>
     <collision>
-      <origin xyz="0 0 ${wrist_length / 2.0}" rpy="0 0 0"/>
+      <origin xyz="0 0 -0.093" rpy="${PI / 2.0} 0 0"/>
       <geometry>
-        <cylinder radius="${arm_radius * 0.8}" length="${wrist_length}"/>
+        <mesh filename="package://ur_description/meshes/ur5/collision/wrist1.stl"/>
       </geometry>
     </collision>
-    <xacro:cylinder_inertial mass="0.3" radius="${arm_radius * 0.8}" length="${wrist_length}"/>
+    <xacro:cylinder_inertial mass="1.219" radius="0.045" length="0.09"/>
   </link>
+
   <joint name="wrist_joint" type="revolute">
     <parent link="forearm_link"/>
     <child link="wrist_link"/>
-    <origin xyz="0 0 ${forearm_length}" rpy="0 0 0"/>
+    <origin xyz="-0.39225 0 0.10915" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
-    <limit lower="-3.14" upper="3.14" effort="10.0" velocity="2.0"/>
-    <dynamics damping="0.1" friction="0.0"/>
+    <limit lower="-6.283185307" upper="6.283185307" effort="28.0" velocity="3.14159265"/>
   </joint>
 
-  <!-- 腕部第 2、3 段：Z-Y-Z 球形腕，和 pan/lift/elbow 一起构成 6R。
-       ⚠️ 第 3 段轴必须是 Z：夹爪沿 +Z 装在这个法兰上，绕工具轴自转就是绕 Z。
-       ⚠️ pitch = 0 时第 1、3 段共线，是 Z-Y-Z 固有的奇异位形，不是建模错误。 -->
   <link name="wrist_pitch_link">
     <visual>
-      <origin xyz="0 0 ${wrist_pitch_length / 2.0}" rpy="0 0 0"/>
+      <origin xyz="0 0 -0.095" rpy="0 0 0"/>
       <geometry>
-        <cylinder radius="${arm_radius * 0.7}" length="${wrist_pitch_length}"/>
+        <mesh filename="package://ur_description/meshes/ur5/visual/wrist2.dae"/>
       </geometry>
-      <material name="orange">
-        <color rgba="0.9 0.45 0.1 1.0"/>
+      <material name="ur_light_grey">
+        <color rgba="0.7 0.7 0.7 1.0"/>
       </material>
     </visual>
     <collision>
-      <origin xyz="0 0 ${wrist_pitch_length / 2.0}" rpy="0 0 0"/>
+      <origin xyz="0 0 -0.095" rpy="0 0 0"/>
       <geometry>
-        <cylinder radius="${arm_radius * 0.7}" length="${wrist_pitch_length}"/>
+        <mesh filename="package://ur_description/meshes/ur5/collision/wrist2.stl"/>
       </geometry>
     </collision>
-    <xacro:cylinder_inertial mass="0.2" radius="${arm_radius * 0.7}"
-                              length="${wrist_pitch_length}"/>
+    <xacro:cylinder_inertial mass="1.219" radius="0.045" length="0.09"/>
   </link>
+
   <joint name="wrist_pitch_joint" type="revolute">
     <parent link="wrist_link"/>
     <child link="wrist_pitch_link"/>
-    <origin xyz="0 0 ${wrist_length}" rpy="0 0 0"/>
-    <axis xyz="0 1 0"/>
-    <limit lower="-1.6" upper="1.6" effort="10.0" velocity="2.0"/>
-    <dynamics damping="0.1" friction="0.0"/>
+    <origin xyz="0 -0.09465 0" rpy="${PI / 2.0} 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-6.283185307" upper="6.283185307" effort="28.0" velocity="3.14159265"/>
   </joint>
 
   <link name="wrist_roll_link">
     <visual>
-      <origin xyz="0 0 ${wrist_roll_length / 2.0}" rpy="0 0 0"/>
+      <origin xyz="0 0 -0.0818" rpy="${PI / 2.0} 0 0"/>
       <geometry>
-        <cylinder radius="${arm_radius * 0.6}" length="${wrist_roll_length}"/>
+        <mesh filename="package://ur_description/meshes/ur5/visual/wrist3.dae"/>
       </geometry>
-      <material name="grey">
-        <color rgba="0.35 0.37 0.40 1.0"/>
+      <material name="ur_light_grey">
+        <color rgba="0.7 0.7 0.7 1.0"/>
       </material>
     </visual>
     <collision>
-      <origin xyz="0 0 ${wrist_roll_length / 2.0}" rpy="0 0 0"/>
+      <origin xyz="0 0 -0.0818" rpy="${PI / 2.0} 0 0"/>
       <geometry>
-        <cylinder radius="${arm_radius * 0.6}" length="${wrist_roll_length}"/>
+        <mesh filename="package://ur_description/meshes/ur5/collision/wrist3.stl"/>
       </geometry>
     </collision>
-    <xacro:cylinder_inertial mass="0.15" radius="${arm_radius * 0.6}"
-                              length="${wrist_roll_length}"/>
+    <xacro:cylinder_inertial mass="0.1879" radius="0.045" length="0.08"/>
   </link>
+
   <joint name="wrist_roll_joint" type="revolute">
     <parent link="wrist_pitch_link"/>
     <child link="wrist_roll_link"/>
-    <origin xyz="0 0 ${wrist_pitch_length}" rpy="0 0 0"/>
+    <origin xyz="0 0.0823 0" rpy="${PI / 2.0} ${PI} ${PI}"/>
     <axis xyz="0 0 1"/>
-    <limit lower="-3.14" upper="3.14" effort="5.0" velocity="2.0"/>
-    <dynamics damping="0.05" friction="0.0"/>
+    <limit lower="-6.283185307" upper="6.283185307" effort="28.0" velocity="3.14159265"/>
   </joint>
 
-  <!-- ============================== Gripper ================================ -->
   <link name="gripper_base_link">
     <visual>
       <geometry>
         <box size="0.05 0.06 0.02"/>
       </geometry>
       <material name="black">
-        <color rgba="0.1 0.1 0.1 1.0"/>
+        <color rgba="0.05 0.05 0.05 1.0"/>
       </material>
     </visual>
     <collision>
@@ -415,7 +444,7 @@
           <box size="0.01 0.012 0.04"/>
         </geometry>
         <material name="black">
-          <color rgba="0.1 0.1 0.1 1.0"/>
+          <color rgba="0.05 0.05 0.05 1.0"/>
         </material>
       </visual>
       <collision>
