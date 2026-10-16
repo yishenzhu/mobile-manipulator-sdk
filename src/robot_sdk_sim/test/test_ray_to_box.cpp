@@ -40,5 +40,12 @@ TEST(RayToBox, MissesWhenOutsideTheSlab) {
   EXPECT_DOUBLE_EQ(rayToBox(0.0, 0.0, 0.2, 0.0, 0.0, 1.0), 2.3);
 }
 
+TEST(RayToBox, OutsideOriginReturnsEntryDistance) {
+  // ⚠️ 起点在**房间外**时给的是「进入房间的距离」（t_enter），不是穿过房间后的出口。
+  // 这条分支不常用，但抽取函数时最容易顺手写错（写成 t_exit 就静默变成另一个数）。
+  EXPECT_DOUBLE_EQ(rayToBox(7.0, 0.0, 1.0, -1.0, 0.0, 0.0), 2.0);   // 从 x=+7 朝 -x ⇒ 在 x=+5 进入
+  EXPECT_DOUBLE_EQ(rayToBox(0.0, 0.0, 3.0, 0.0, 0.0, -1.0), 0.5);   // 从天花板外朝下 ⇒ 在 z=2.5 进入
+}
+
 }  // namespace
 }  // namespace robot_sdk::sim
