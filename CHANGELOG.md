@@ -19,9 +19,23 @@
 - 可视化：RViz 缺 TF（相机/激光/底盘链）、`black` 材质重复定义、MockRobotModel 默认未启用等一串问题修复。
 - **传感器帧重复发布**：mock 与 URDF 各发一套挂载 TF ⇒ 同一个 `imu_link`/`camera_link` 有两个父节点、
   `TF_REPEATED_DATA`、位置在两个值之间跳；已统一到 URDF（`/tf_static` 发布者 2 → 1）。
+- **`cancel()` 在"目标已发出、还没被接受"的窗口里被静默丢弃**：那一刻取不到 goal handle，原先直接 `return`，
+  连"客户要过取消"这个意图都没记下 ⇒ 目标随后被接受并**照常执行**，谁也停不了。
+  实测（真 mock）：派发后立刻 `cancel()`，**12/12 次取消都被丢掉**（终态 `SUCCEEDED` ✗）。
+  按业界做法（nav2 的 `BasicNavigator`）把**窗口本身消掉**，而不是绕过它 —— 派发时就等到"接受"
+  再返回 handle，之后 `cancel()` 一定有 goal handle 可用。受害面是"刚派发就反悔"的路径
+  （`cancelAll()`、agent 超时、用户按停）—— 恰恰是最需要取消的时刻。
 
 ### 变了（行为变化）
 
+- **`ActionHandle::cancel()` 现在等服务端的取消响应，并返回 `bool`**（对齐 rclpy 的 `cancel_goal()`、
+  nav2 的 `cancel_goal_async()` + 等待）：返回值 = 服务端是否受理（响应 `goals_canceling` 里列了这个 goal）。
+  ⚠️ **不要从 executor 线程（某个回调里）调用** —— 等响应要靠 executor 处理，等下去会死锁
+  （实测：在回调里改成等待后，用例永不返回，只能用 `kill -9` 收尾）。要确认**真的停下**仍看 `wait()` 的终态是否 `CANCELED`。
+- **派发（`goToAsync` / `moveToJointPositionsAsync` / `moveToPoseAsync`）现在等到"接受"再返回**，
+  上限取自 `server_wait_timeout_s`（`MotionConfig` 补上这一项，默认 5.0，与 `NavigationConfig` 同名同义）。
+  代价：**服务端不在场时会把该超时等满**（原先立刻返回）—— 与 nav2 的行为一致。
+  另：三个装配点都受此约束，取消不再有"空白窗口"。
 - **⚠️ 破坏性：`state` 单值枚举 → `state_bits` 位掩码（`uint32`）**。旧常量 `STATE_IDLE/NAVIGATING/MOVING/…` 全删，改为
   位：`bit0 STATE_BASE_MOVING`（底盘在动，**含 cmd_vel 路径**）、`bit1 STATE_ARM_MOVING`、`bit2 STATE_CHARGING`、
   `bit3 STATE_ESTOP`、`bit4 STATE_BATTERY_LOW`；同时删掉与之重复的 `is_charging` / `is_battery_low` / `is_estop_engaged`。

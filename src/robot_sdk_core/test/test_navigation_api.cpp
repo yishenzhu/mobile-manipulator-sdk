@@ -37,6 +37,9 @@ class NavigationApiTest : public ::testing::Test {
     NavigationConfig config;
     // 故意指向一个不存在的 action server，走"后端不在场"的路径。
     config.action_name = "definitely_no_such_action_server";
+    // goToAsync 现在要等到"接受"（对齐 nav2）⇒ 没有服务端就得等满这个超时，
+    // 默认 5 秒会让用例白等；这里收短，只为了跑得快。
+    config.server_wait_timeout_s = 0.2;
     return config;
   }
 };
@@ -94,16 +97,33 @@ using GoalHandle = rclcpp_action::ServerGoalHandle<Action>;
 /// 用于验证 goTo() 不轻信这个声明 —— 它会读回位姿核实。
 class FakeNavigateServer {
  public:
-  FakeNavigateServer(const rclcpp::Node::SharedPtr& node, const std::string& name) {
+  // 曾经被取消过几次 —— 用来证明"取消真的送到了服务端"，不依赖客户端调 wait()。
+  std::atomic<int> cancel_seen{0};
+
+  // hold_s > 0 时 execute 会拖这么久再回成功 —— 好让"取消"有机会送达并被断言到。
+  FakeNavigateServer(const rclcpp::Node::SharedPtr& node, const std::string& name,
+                     double hold_s = 0.0) {
     server_ = rclcpp_action::create_server<Action>(
         node, name,
         [](const rclcpp_action::GoalUUID&, std::shared_ptr<const Action::Goal>) {
           return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
         },
-        [](const std::shared_ptr<GoalHandle>) { return rclcpp_action::CancelResponse::ACCEPT; },
-        [](const std::shared_ptr<GoalHandle> handle) {
-          // 立刻"成功"，但机器人一步都没动 —— 这就是要复现的那类服务端。
-          std::thread([handle]() {
+        [this](const std::shared_ptr<GoalHandle>) {
+          cancel_seen.fetch_add(1);
+          return rclcpp_action::CancelResponse::ACCEPT;
+        },
+        [hold_s](const std::shared_ptr<GoalHandle> handle) {
+          std::thread([handle, hold_s]() {
+            const auto deadline =
+                std::chrono::steady_clock::now() + std::chrono::duration<double>(hold_s);
+            while (std::chrono::steady_clock::now() < deadline) {
+              if (handle->is_canceling()) {
+                handle->canceled(std::make_shared<Action::Result>());
+                return;
+              }
+              std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            }
+            // 立刻"成功"，但机器人一步都没动 —— 这就是要复现的那类服务端。
             auto result = std::make_shared<Action::Result>();
             result->success = true;
             result->final_distance_error = 0.0f;
@@ -137,12 +157,12 @@ struct Harness {
   std::unique_ptr<tf2_ros::StaticTransformBroadcaster> tf_broadcaster;
   std::unique_ptr<FakeNavigateServer> server;
 
-  explicit Harness(bool publish_tf, const std::string& action_name) {
+  explicit Harness(bool publish_tf, const std::string& action_name, double hold_s = 0.0) {
     if (publish_tf) {
       tf_broadcaster = std::make_unique<tf2_ros::StaticTransformBroadcaster>(node);
       tf_broadcaster->sendTransform(originTransform());
     }
-    server = std::make_unique<FakeNavigateServer>(node, action_name);
+    server = std::make_unique<FakeNavigateServer>(node, action_name, hold_s);
     executor->add_node(node);
     spinner = std::thread([this]() { executor->spin(); });
   }
@@ -205,6 +225,48 @@ TEST_F(NavigationApiTest, GoToKeepsSuccessWhenPoseCannotBeRead) {
 
   ASSERT_TRUE(result.ok());
   EXPECT_TRUE(result.value().success);
+}
+
+// 派发**紧接着**取消：这条路上曾丢过取消（那时 goToAsync 不等接受，cancel() 取不到
+// goal handle 就被静默丢掉）。现在派发时就等到接受（对齐 nav2），所以取消一定发得出去。
+TEST_F(NavigationApiTest, CancelRightAfterDispatchIsNotLost) {
+  Harness h(/*publish_tf=*/true, "fake_navigate_to_pose", /*hold_s=*/1.0);
+  NavigationAPI nav(h.node, h.group, h.transform, fakeServerConfig());
+
+  ASSERT_TRUE(nav.serverAvailable(2s));
+  auto handle = nav.goToAsync(goalAt(5.0));
+  EXPECT_TRUE(handle->cancel());             // ← 紧接着取消：服务端受理
+
+  const auto result = handle->wait(8s);
+  ASSERT_TRUE(result.ok()) << result.error().message;
+  EXPECT_EQ(result.value().code, rclcpp_action::ResultCode::CANCELED);
+}
+
+// 取消不该依赖"调用方后来调了 wait()"：只调 cancel()，取消也要送到服务端。
+TEST_F(NavigationApiTest, CancelReachesServerWithoutWaiting) {
+  Harness h(/*publish_tf=*/true, "fake_navigate_to_pose", /*hold_s=*/1.0);
+  NavigationAPI nav(h.node, h.group, h.transform, fakeServerConfig());
+
+  ASSERT_TRUE(nav.serverAvailable(2s));
+  auto handle = nav.goToAsync(goalAt(5.0));
+  handle->cancel();                          // ← 只取消，**不调 wait()**
+
+  for (int i = 0; i < 100 && h.server->cancel_seen.load() == 0; ++i) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  }
+  EXPECT_GT(h.server->cancel_seen.load(), 0);
+}
+
+// cancel() 会等取消响应：目标已被接受时它应返回 true（服务端受理了这个 goal）。
+// goToAsync 现在就等到接受，所以这里不必再显式等一次。
+TEST_F(NavigationApiTest, CancelWaitsForResponseWhenAccepted) {
+  Harness h(/*publish_tf=*/true, "fake_navigate_to_pose", /*hold_s=*/1.0);
+  NavigationAPI nav(h.node, h.group, h.transform, fakeServerConfig());
+
+  ASSERT_TRUE(nav.serverAvailable(2s));
+  auto handle = nav.goToAsync(goalAt(5.0));
+
+  EXPECT_TRUE(handle->cancel());                // 受理了 ⇒ true（等到了取消响应）
 }
 
 }  // namespace

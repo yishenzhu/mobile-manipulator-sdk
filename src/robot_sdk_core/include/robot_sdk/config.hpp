@@ -41,6 +41,9 @@ struct MotionConfig {
   std::string pose_frame{"map"};
   std::vector<std::string> joint_names{};
   double default_timeout_s{30.0};
+  /// 等"服务端接受目标"的上限，同 NavigationConfig::server_wait_timeout_s：
+  /// 派发时等到接受才返回 handle，取消才不会有"还没有 goal handle"的空窗。
+  double server_wait_timeout_s{5.0};
   std::map<std::string, std::vector<double>> named_targets{};
   std::string gripper_joint{"gripper_joint"};
   /// ⚠️ 默认值必须落在**参考机器人夹爪的行程内**（URDF 的 `gripper_joint` 是 [0, 0.03]）。

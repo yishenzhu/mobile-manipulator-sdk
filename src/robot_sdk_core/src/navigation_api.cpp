@@ -65,6 +65,10 @@ NavigationAPI::goToAsync(const NavigationGoal &goal,
   handle->bind(client_->async_send_goal(makeGoalMessage(goal), options),
                client_);
 
+  // 对齐 nav2：等到"接受"再返回 handle —— 之后 cancel() 一定有 goal handle 可用，
+  // 不存在"发出去但还没被接受"的空窗（那条路上取消会被静默丢掉）。
+  handle->waitForAcceptance(std::chrono::duration<double>(config_.server_wait_timeout_s));
+
   std::lock_guard<std::mutex> lock(handles_mutex_);
   active_handles_.push_back(handle);
   return handle;
@@ -129,7 +133,7 @@ NavigationAPI::currentPose(std::chrono::duration<double> timeout) const {
 
 void NavigationAPI::cancelAll() {
   // 锁内只做"清理登记 + 把句柄拷出来"这两件小事，**取消动作放到锁外** ——
-  // cancel() 会走 async_cancel_goal（有 I/O），不该占着这把锁。
+  // cancel() 会发取消请求并等响应（有 I/O 和等待），不该占着这把锁。最坏 N 个句柄 × 200 ms。
   // 这与本项目其它地方（dispatchFeedback / onStatus）是同一个模式。
   std::vector<std::shared_ptr<ActionHandle<Action>>> handles;
   {

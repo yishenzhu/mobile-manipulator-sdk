@@ -69,20 +69,36 @@ class ActionHandle {
     return goal_future_.wait_for(timeout) == std::future_status::ready && accepted();
   }
 
-  /// 请求取消目标。可从任意线程调用。
-  void cancel() {
+  /// 请求取消目标，并**等服务端的取消响应**（对齐 rclpy 的 cancel_goal()）。
+  /// 返回"服务端是否受理了这次取消"（响应里列出了这个 goal）。
+  /// 前提是目标已被接受 —— 本 SDK 的 goToAsync/moveToPoseAsync 都等到接受了才返回，
+  /// 所以这条路径不会遇到"还没有 goal handle"的空窗。
+  /// ⚠️ 不要从 executor 线程（某个回调里）调用：等响应要 executor 处理，等下去会死锁。
+  bool cancel() {
     auto client = client_.lock();
     if (!client || !goal_future_.valid()) {
-      return;
+      return false;
     }
-    // 非阻塞地检查 future 是否就绪。目标还没被接受时取不到 goal handle，
-    // 此时不该硬取（shared_future::get() 会阻塞）。
     if (goal_future_.wait_for(std::chrono::seconds(0)) != std::future_status::ready) {
-      return;
+      return false;
     }
-    if (auto goal_handle = goal_future_.get()) {
-      client->async_cancel_goal(goal_handle);
+    auto goal_handle = goal_future_.get();
+    if (!goal_handle) {
+      return false;
     }
+    auto response_future = client->async_cancel_goal(goal_handle);
+    const auto response = response_future.get();
+    if (!response) {
+      return false;
+    }
+    const auto wanted = goal_handle->get_goal_id();
+    for (const auto& goal_info : response->goals_canceling) {
+      // goal_id 是 ROS 消息类型（没有 operator==），比它内部那个 16 字节数组。
+      if (goal_info.goal_id.uuid == wanted) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /// 最多等 `timeout` 拿到目标的终态结果。两个阶段共用一个 deadline（总耗时受 timeout

@@ -119,6 +119,9 @@ TEST_F(MotionApiTest, GripperTimeoutComesFromConfig) {
   MotionConfig config;
   config.action_name = "definitely_no_such_action_server";
   config.gripper_timeout_s = 0.3;  // 故意偏离默认的 5.0
+  // 没有服务端时，"等接受"也会耗满它自己的预算 —— 那是无关变量，一起固定住，
+  // 否则这条用例量到的是等接受的时间，而不是夹爪超时。
+  config.server_wait_timeout_s = 0.3;
   MotionAPI api(node, node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive),
                 config);
 

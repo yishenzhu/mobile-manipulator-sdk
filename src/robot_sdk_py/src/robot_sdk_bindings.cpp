@@ -254,7 +254,8 @@ void bindHandle(py::module_& m, const char* name, const char* doc) {
   using Handle = ActionHandle<Action>;
   py::class_<Handle, std::shared_ptr<Handle>>(m, name, doc)
       .def("valid", &Handle::valid, "目标是否已经发出去过。")
-      .def("cancel", &Handle::cancel, "请求取消；可从任意线程调。")
+      .def("cancel", &Handle::cancel,
+           "请求取消并等取消响应；返回服务端是否受理。要确认真的停下来，再调 wait() 看终态是否 CANCELED。")
       .def(
           "wait_for_acceptance",
           [](Handle& handle, double timeout_s) {

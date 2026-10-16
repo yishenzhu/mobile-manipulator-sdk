@@ -69,6 +69,9 @@ std::shared_ptr<ActionHandle<MotionAPI::Action>> MotionAPI::moveToJointPositions
 
   handle->bind(client_->async_send_goal(message, options), client_);
 
+  // 对齐 nav2：等到"接受"再返回 handle —— 之后 cancel() 一定有 goal handle 可用。
+  handle->waitForAcceptance(std::chrono::duration<double>(config_.server_wait_timeout_s));
+
   std::lock_guard<std::mutex> lock(handles_mutex_);
   active_handles_.push_back(handle);
   return handle;
@@ -133,6 +136,9 @@ std::shared_ptr<ActionHandle<MotionAPI::PoseAction>> MotionAPI::moveToPoseAsync(
   };
 
   handle->bind(pose_client_->async_send_goal(message, options), pose_client_);
+
+  // 对齐 nav2：等到"接受"再返回 handle —— 之后 cancel() 一定有 goal handle 可用。
+  handle->waitForAcceptance(std::chrono::duration<double>(config_.server_wait_timeout_s));
 
   std::lock_guard<std::mutex> lock(handles_mutex_);
   active_pose_handles_.push_back(handle);
