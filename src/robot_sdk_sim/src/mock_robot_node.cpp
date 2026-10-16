@@ -6,11 +6,17 @@
 #include "robot_sdk_sim/tick_action.hpp"
 
 #include <algorithm>
+#include <cerrno>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <string>
 #include <utility>
+
+#include <fcntl.h>
+#include <sys/file.h>
+#include <unistd.h>
 
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <rcl_action/rcl_action.h>
@@ -272,6 +278,29 @@ MockRobotNode::MockRobotNode(const rclcpp::NodeOptions &options)
         }
       },
       rclcpp::ServicesQoS(), service_group_);
+
+  // 唯一性：flock 锁文件。范围是「本机 + 本域」—— 同域就是同一个 DDS 图，与哪个用户无关。
+  // 不同域可并存；同域要跑多个：--ros-args -p unique:=false
+  if (declare_parameter<bool>("unique", true)) {
+    const char *dir = std::getenv("XDG_RUNTIME_DIR");  // 没有则退回 /tmp
+    const char *domain = std::getenv("ROS_DOMAIN_ID");
+    const std::string lock_path =
+        std::string(dir ? dir : "/tmp") + "/mock_robot_" + (domain ? domain : "0") + ".lock";
+    // flock 只读也能加锁；0666 是让不同用户也能打开同一个锁文件（我们从不写它）。
+    lock_fd_ = ::open(lock_path.c_str(), O_RDONLY | O_CREAT, 0666);
+    if (lock_fd_ < 0) {
+      // fail-closed：打不开锁就拒绝启动 —— 否则会悄悄失去唯一性保护。
+      RCLCPP_FATAL(get_logger(), "打不开锁文件 %s：%s —— 拒绝启动", lock_path.c_str(),
+                   std::strerror(errno));
+      rclcpp::shutdown();
+      std::exit(1);
+    } else if (::flock(lock_fd_, LOCK_EX | LOCK_NB) != 0) {
+      RCLCPP_FATAL(get_logger(), "锁 %s 已被占用，拒绝启动（要并存加 -p unique:=false）",
+                   lock_path.c_str());
+      rclcpp::shutdown();
+      std::exit(1);
+    }
+  }
 
   // 导航动作服务端。它跑在**独立的可重入组**里：目标/取消可以在 50 Hz 控制回路
   // 运行期间到达 —— 两条车道真的并发，这正是上面那些状态需要 mutex_ 的理由。

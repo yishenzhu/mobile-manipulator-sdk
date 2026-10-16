@@ -48,6 +48,9 @@ class MockRobotNode : public rclcpp::Node {
   using MoveToJointPositions = robot_sdk_interfaces::action::MoveToJointPositions;
   using GoalHandleMove = rclcpp_action::ServerGoalHandle<MoveToJointPositions>;
 
+  /// 唯一性锁的文件描述符：**必须活到进程结束** —— 关闭它（或进程退出）锁就释放。
+  int lock_fd_{-1};
+
   void controlTick();
   void statusTick();
 
