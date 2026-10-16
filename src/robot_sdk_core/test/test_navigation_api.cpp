@@ -2,8 +2,13 @@
 
 #include <chrono>
 #include <memory>
+#include <string>
+#include <thread>
 
 #include <rclcpp/rclcpp.hpp>
+#include <rclcpp/executors/multi_threaded_executor.hpp>
+#include <rclcpp_action/rclcpp_action.hpp>
+#include <tf2_ros/static_transform_broadcaster.h>
 
 #include "robot_sdk/navigation_api.hpp"
 #include "robot_sdk/transform.hpp"
@@ -13,9 +18,8 @@ using namespace std::chrono_literals;
 
 namespace {
 
-/// 冒烟测试：本类没有真正的 action server 就没法做行为测试，
-/// 但"构造接线是否正确、无服务端时的退化路径是否安全"是可以测的 ——
-/// 而这类问题（构造崩溃、空表操作出错）恰恰是最容易漏的。
+/// 冒烟测试（构造接线 / 无服务端时的退化路径）+ 行为测试（见文件末尾的假服务端）。
+/// 行为测试要回答的问题只有一句：服务端**自称成功**时，SDK 凭什么相信它。
 class NavigationApiTest : public ::testing::Test {
  protected:
   static void SetUpTestSuite() {
@@ -79,5 +83,130 @@ TEST_F(NavigationApiTest, CancelAllToleratesDroppedGoalHandles) {
   EXPECT_NO_THROW(nav.cancelAll());
   EXPECT_NO_THROW(nav.cancelAll());
 }
+
+// ── 行为测试：假服务端 ───────────────────────────────────────────────
+namespace {
+
+using Action = robot_sdk_interfaces::action::NavigateToPose;
+using GoalHandle = rclcpp_action::ServerGoalHandle<Action>;
+
+/// FakeNavigateServer：一个"会撒谎"的假服务端 —— 接受目标后**不移动任何东西**，直接回 success=true。
+/// 用于验证 goTo() 不轻信这个声明 —— 它会读回位姿核实。
+class FakeNavigateServer {
+ public:
+  FakeNavigateServer(const rclcpp::Node::SharedPtr& node, const std::string& name) {
+    server_ = rclcpp_action::create_server<Action>(
+        node, name,
+        [](const rclcpp_action::GoalUUID&, std::shared_ptr<const Action::Goal>) {
+          return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
+        },
+        [](const std::shared_ptr<GoalHandle>) { return rclcpp_action::CancelResponse::ACCEPT; },
+        [](const std::shared_ptr<GoalHandle> handle) {
+          // 立刻"成功"，但机器人一步都没动 —— 这就是要复现的那类服务端。
+          std::thread([handle]() {
+            auto result = std::make_shared<Action::Result>();
+            result->success = true;
+            result->final_distance_error = 0.0f;
+            result->message = "reached target";
+            handle->succeed(result);
+          }).detach();
+        });
+  }
+
+ private:
+  rclcpp_action::Server<Action>::SharedPtr server_;
+};
+
+geometry_msgs::msg::TransformStamped originTransform() {
+  geometry_msgs::msg::TransformStamped tf;
+  tf.header.frame_id = "map";
+  tf.child_frame_id = "base_footprint";
+  tf.transform.rotation.w = 1.0;
+  return tf;
+}
+
+/// 搭一套：节点 + 假服务端 + 原点处的静态 TF，并返回跑起来的 executor。
+struct Harness {
+  rclcpp::Node::SharedPtr node = std::make_shared<rclcpp::Node>("nav_api_fake");
+  rclcpp::CallbackGroup::SharedPtr group =
+      node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+  std::shared_ptr<TransformManager> transform = std::make_shared<TransformManager>(node);
+  std::shared_ptr<rclcpp::executors::MultiThreadedExecutor> executor =
+      std::make_shared<rclcpp::executors::MultiThreadedExecutor>();
+  std::thread spinner;
+  std::unique_ptr<tf2_ros::StaticTransformBroadcaster> tf_broadcaster;
+  std::unique_ptr<FakeNavigateServer> server;
+
+  explicit Harness(bool publish_tf, const std::string& action_name) {
+    if (publish_tf) {
+      tf_broadcaster = std::make_unique<tf2_ros::StaticTransformBroadcaster>(node);
+      tf_broadcaster->sendTransform(originTransform());
+    }
+    server = std::make_unique<FakeNavigateServer>(node, action_name);
+    executor->add_node(node);
+    spinner = std::thread([this]() { executor->spin(); });
+  }
+  ~Harness() {
+    executor->cancel();
+    if (spinner.joinable()) {
+      spinner.join();
+    }
+  }
+};
+
+NavigationConfig fakeServerConfig() {
+  NavigationConfig config;
+  config.action_name = "fake_navigate_to_pose";
+  config.arrival_tolerance_m = 0.05;        // 收紧，让判定明确
+  config.arrival_yaw_tolerance_rad = 0.05;
+  config.server_wait_timeout_s = 2.0;
+  return config;
+}
+
+NavigationGoal goalAt(double x) {
+  NavigationGoal goal;
+  goal.target = Pose2D{x, 0.0, 0.0};
+  goal.timeout_s = 8.0;
+  return goal;
+}
+
+TEST_F(NavigationApiTest, GoToRejectsSuccessThatPoseDoesNotSupport) {
+  Harness h(/*publish_tf=*/true, "fake_navigate_to_pose");
+  NavigationAPI nav(h.node, h.group, h.transform, fakeServerConfig());
+
+  // 机器人实际停在原点，目标在 1 m 外，服务端却说"到了" ⇒ SDK 必须判失败。
+  auto result = nav.goTo(goalAt(1.0));
+
+  ASSERT_TRUE(result.ok()) << "传输层应当走完（ok 与 success 是两层）";
+  EXPECT_FALSE(result.value().success);
+  EXPECT_NE(result.value().message.find("off"), std::string::npos)
+      << "报文应说明是位姿不符：" << result.value().message;
+}
+
+TEST_F(NavigationApiTest, GoToAcceptsSuccessWhenPoseMatches) {
+  Harness h(/*publish_tf=*/true, "fake_navigate_to_pose");
+  NavigationAPI nav(h.node, h.group, h.transform, fakeServerConfig());
+
+  // 目标就在原点附近（机器人在那儿）⇒ 同样"撒谎"的服务端，这次不该被判失败。
+  auto result = nav.goTo(goalAt(0.0));
+
+  ASSERT_TRUE(result.ok());
+  EXPECT_TRUE(result.value().success);
+}
+
+TEST_F(NavigationApiTest, GoToKeepsSuccessWhenPoseCannotBeRead) {
+  // 故意发一条没人用的坐标系 ⇒ 读不回位姿 ⇒ **不改判**（不能因为查询失败把成功的动作判死）。
+  Harness h(/*publish_tf=*/false, "fake_navigate_to_pose");
+  auto config = fakeServerConfig();
+  config.base_frame = "definitely_no_such_frame";
+  NavigationAPI nav(h.node, h.group, h.transform, config);
+
+  auto result = nav.goTo(goalAt(1.0));
+
+  ASSERT_TRUE(result.ok());
+  EXPECT_TRUE(result.value().success);
+}
+
+}  // namespace
 
 }  // namespace

@@ -772,8 +772,8 @@ ws/docs/sdk-call-flow.md        ← 姊妹文档（SDK 调用流程 + 与手写 
 | 2 | 建定时器组 | `timer_group_` |
 | 3 | 初始化关节（含"没配就给默认 4 轴臂" + 追加夹爪） | `joint_names_` / `joint_positions_` |
 | 4 | 建 2 个发布者 | `status_pub_` / `joint_pub_` |
-| 5 | 建 2 个 TF 广播器 | `tf_broadcaster_` / `static_tf_broadcaster_` |
-| 6 | 发 3 个传感器静态变换 | `laser_frame_` / `imu_frame_` / `camera_frame_` |
+| 5 | 建 1 个 TF 广播器（只发世界位姿） | `tf_broadcaster_` |
+| 6 | **不发**传感器静态变换 | 挂载点是 URDF 的 fixed joint，归 `robot_state_publisher`（本节点只发世界位姿 + 传感器数据） |
 | 7 | 建服务组 + 状态服务 | `service_group_` / `status_service_` |
 | 8 | 建动作组 + **2 个动作服务端**（每个 13 行样板） | `action_group_` / `nav_server_` / `motion_server_` |
 | 9 | 建 2 个定时器 | `control_timer_` / `status_timer_` |
@@ -858,9 +858,9 @@ mock **不会绕路**（§1.3），但传感器总得照到点什么。所以给
 |---|---|
 | **无回波用 `inf`**，不是 `0`、也不是 `range_max` | 这是 ROS 的约定。用 0 会被下游当成"紧贴障碍物"，直接触发急停 |
 | **`range_min` 处截断**，不返回负值/零 | 机器人贴墙时交点距离可能趋近 0，截到 `range_min` 才符合"雷达的最小可测距离" |
-| **`header.frame_id = laser_frame`** | 光束角度是**激光坐标系**里的角。机器人转了，世界角要跟着转（`pose_.yaw + angle`）—— 少加这一项，扫描会**固定在初始朝向**，而且不报错 |
+| **`header.frame_id = laser_link`** | 光束角度是**激光坐标系**里的角。机器人转了，世界角要跟着转（`pose_.yaw + angle`）—— 少加这一项，扫描会**固定在初始朝向**，而且不报错 |
 
-**挂载点偏移也得算**：激光在 base 前 0.1 m（与那条静态 TF 一致），而且这个偏移要**随机器人朝向旋转**。忽略它只会带来 0.1 m 的误差 —— 小到不会引起怀疑，但正好会让"精确到小数点后三位"的验收失败。
+**挂载点偏移也得算**：激光的挂载偏移**从 URDF 的 `laser_joint` 读**（`originFromFile`，不抄数字 —— 抄一份必然与模型漂移），而且这个偏移要**随机器人朝向旋转**。忽略它只会带来十几厘米的误差 —— 小到不会引起怀疑，但正好会让"精确到小数点后三位"的验收失败。
 
 ### 11.3 IMU 的两个决定
 
@@ -928,6 +928,10 @@ sensor_qos.keep_last(config_.qos.sensor.depth);
 **不一致的后果是"静默收不到"**，而不是报错。特别是：`SensorDataQoS()` 的默认深度是 **5**，而 `qos.sensor.depth` 的默认值是 **10** —— 不显式 `keep_last` 的话，那个配置项就是"改了不生效"的死配置。SDK 侧已经踩过这个坑（`perception_api.cpp` 里有注释），mock 侧照抄。
 
 ### 11.6 验收数据（**全是解析解**）
+
+> ⚠️ **待重验**：本表按 mock **原来的**挂载点常量算（激光在 base 前 0.1、相机装高 0.3）。
+> 挂载点已改为**从 URDF 读** ⇒ 第 ③ 项（激光前 0.1 ⇒ 4.900）与第 ⑦ 项（相机高 0.3）
+> 的数值需重新核对；其余各项与挂载点无关，仍然有效。
 
 把机器人从 (0,0) 导航到 (3,0)，比较前后：
 

@@ -143,7 +143,11 @@ class MockRobotNode : public rclcpp::Node {
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr description_pub_;
 
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
-  std::unique_ptr<tf2_ros::StaticTransformBroadcaster> static_tf_broadcaster_;
+  /// 传感器挂载点：**从 URDF 读**（挂载点是机器人的属性，抄一份必然漂）。默认值=读不到时的兜底。
+  double laser_mount_x_{0.1};
+  double laser_mount_z_{0.2};
+  double camera_mount_x_{0.2};
+  double camera_mount_z_{0.3};
 
   rclcpp::TimerBase::SharedPtr control_timer_;
   rclcpp::TimerBase::SharedPtr status_timer_;
@@ -214,7 +218,7 @@ class MockRobotNode : public rclcpp::Node {
   double last_yaw_{0.0};
 
   // 传感器挂载点（相对 base_frame 的静态变换里用得到）
-  std::string laser_frame_{"laser_frame"};
+  std::string laser_frame_{"laser_link"};
   std::string imu_frame_{"imu_link"};
   std::string camera_frame_{"camera_link"};
   /// 相机的**光学帧**。ROS 约定图像数据的坐标系是：z 朝前、x 朝右、y 朝下；

@@ -24,10 +24,15 @@ mock 一个人就把要画的东西全发出来了（不需要 Gazebo）：
 **TF 树【量】**（起 mock 后 `ros2 run tf2_tools view_frames` 读出来的）：
 
 ```
-map ──▶ odom ──▶ base_footprint ──┬──▶ laser_frame
-                                  ├──▶ imu_link
-                                  └──▶ camera_link ──▶ camera_optical_frame
+map ──▶ odom ──▶ base_footprint ──▶ base_link ──┬──▶ laser_link
+                                                ├──▶ imu_link
+                                                ├──▶ camera_link ──▶ camera_optical_frame
+                                                ├──▶ caster_link ──▶ arm_pedestal_link ──▶ …（手臂链）
 ```
+
+分工（见 §2.3 坑二）：**世界位姿 `map→odom→base_footprint` 由 mock 广播**（URDF 不可能知道
+"机器人在哪"）；**`base_link` 往下的整棵树由 `robot_state_publisher` 从 URDF 算出来**
+（fixed 关节走 `/tf_static`，可动关节跟 `/joint_states`）。
 
 `map → odom → base_footprint` 由 mock 直接广播 ⇒ **相当于"定位永远完美"**。所以 RViz 的
 **Fixed Frame 用 `map`**，机器人就落在原点（【量】`tf2_echo map base_footprint` = `[0, 0, 0]`）。
@@ -66,7 +71,7 @@ ros2 run rviz2 rviz2 -d $(ros2 pkg prefix robot_sdk_sim)/share/robot_sdk_sim/rvi
 | LaserScan | `/scan` | 开 | 四面墙的一圈点 |
 | DepthPoints | `/camera/depth/points` | 开 | 深度相机的点云 |
 | DepthImage | `/camera/depth/image_raw` | 开 | 深度图（0–5 m 归一化） |
-| RobotModel | `/robot_description` | **关** | 见 §2.3，默认给不了 |
+| RobotModel | `/robot_description` | 开 | mock 已 latch 发布该话题（见 §2.4） |
 | Map | `/map` | **关** | 跑 Nav2 整栈时再打开（`map_server` 才有） |
 
 ### 2.3 两个必须知道的坑
@@ -79,37 +84,27 @@ Best Effort 了（`Reliability Policy: Best Effort`），自己加 display 时�
 
 这和 SDK 侧 `perception_api.cpp` 踩过的是同一个坑（见 `mock-robot-node.md` §11.5）。
 
-**坑二：RobotModel 和 mock 的传感器 TF 对不上。**
+反过来，**读 latch 的话题**（如 `/robot_description`）必须显式要求 Transient Local，
+否则读到的是空的：`ros2 topic echo /robot_description --qos-durability transient_local --once`。
 
-这是**实测**出来的，而且有三处不一致 —— 想看机器人本体之前必须先知道：
+**坑二：传感器挂载点只由 URDF/RSP 提供（曾有两套，已修）。**
 
-| | URDF（`robot_description`） | mock（`mock_robot_node.cpp:216-221`） |
-|---|---|---|
-| 激光帧名 | `laser_link` | **`laser_frame`**（URDF 里没这个名字） |
-| 三个传感器的**父帧** | `base_link` | **`base_footprint`** |
-| 激光挂载点 | `0.16, 0, 0.105`（相对 base_link） | `0.1, 0, 0.2`（相对 base_footprint） |
-| IMU 挂载点 | `0, 0, 0.03` | `0, 0, 0.1` |
-| 相机挂载点 | `0.2, 0, 0.11` | `0.2, 0, 0.3` |
+早先 mock 会**自己再发一份**传感器挂载 TF（挂在 `base_footprint` 下），而 URDF 里也有一份
+（挂在 `base_link` 下）⇒ `/tf_static` 有 2 个发布者、同一个 `imu_link` 有两个父节点，
+TF 报 `TF_REPEATED_DATA`、传感器帧在两个位置之间跳。
 
-（`base_link` 自己比 `base_footprint` 高 `0.055`，所以两边的 z 差还要再加上这 0.055。）
+现在统一到 URDF：**mock 只发世界位姿 + 传感器数据**（`/scan` 等），挂载点全部由
+`robot_state_publisher` 从 URDF 发；mock 需要的那几个挂载量（激光/相机的 x/z）
+也**从 URDF 读**，不抄数字。⇒ 【量】`/tf_static` 发布者 = **1**、共 **10 条**。
 
-后果：**同时**起 mock 和 `robot_state_publisher` 时，`/tf` 和 `/tf_static` 各有
-**2 个发布者【量】**，`imu_link` / `camera_link` 就有了**两个不同的父节点**，位置也不一样。
-TF 会报 `TF_REPEATED_DATA`，传感器帧会在两个位置之间跳。
+⚠️ 代价：**裸跑 mock（不起 RSP）时传感器帧就没有 TF** —— 用 `mock_robot.launch.py` 启动即可
+（它默认就起 RSP）。
 
-所以现实里是二选一：
+### 2.4 看机器人本体（RobotModel）
 
-- **只看 mock 自己的数据**（激光/点云/深度图 + 机器人位姿）—— 一切正常，`laser_frame` 的位置是对的
-  （mock 的世界自洽，`mock-robot-node.md` §11.6 那套解析解就是照它的偏移验的）。
-- **要看机器人本体** —— 模型来自 URDF，于是那几条传感器帧会和 mock 打架。
-
-> 这两套数字是**各自独立定的**，从来没对齐过。要统一的话是个设计决定
-> （改 mock 会动到 §11.6 那批已验收的解析解；改 URDF 会动到 MoveIt/Gazebo 那侧），
-> 不在本文范围内。
-
-### 2.4 真想看机器人本体（RobotModel）
-
-mock **不发布** `robot_description`（【量】它的 publisher 列表里没有），所以三选一：
+mock **已经发布** `/robot_description`（【量】RELIABLE + TRANSIENT_LOCAL latch），
+`robot_state_publisher` 也发同名话题 ⇒ 订阅端默认就能拿到，RobotModel 直接可用。
+若想绕开话题，还有两条路：
 
 **① 最快：让 RViz 直接读文件。** 把 RobotModel 的 `Description Source` 改成 `File`，
 `Description File` 填：
@@ -331,3 +326,7 @@ ros2 topic hz /scan                             # 确认数据在动
 **改了 `mock.rviz` 但 `rviz:=true` 没变化。**
 `rviz` 目录是 install 出去的；`--symlink-install` 下软链会跟着源目录走，重新
 `colcon build --packages-select robot_sdk_sim` 一下就同步了。
+
+**启动瞬间 RViz 打出一条 QoS 不兼容的 WARN（由 mock 打出）。**
+属正常：RViz 先按默认（Reliable）建 display，随后才套上配置里的 Best Effort。之后消息正常流动，
+`ros2 topic hz /scan`、`/camera/depth/image_raw` 能证实（实测各 10 Hz）。

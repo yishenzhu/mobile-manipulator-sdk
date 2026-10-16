@@ -95,7 +95,13 @@ if(BUILD_TESTING)
     target_include_directories(test_joint_spec PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
     )
-    ament_target_dependencies(test_joint_spec robot_sdk_core urdf)
+  ament_target_dependencies(test_joint_spec robot_sdk_core urdf)
+
+  # rayToBox 是纯函数（mock_world.hpp），承重"激光看到什么"和"前方挡不挡路"。
+  ament_add_gtest(test_ray_to_box test/test_ray_to_box.cpp)
+  target_include_directories(test_ray_to_box PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/include
+  )
 endif()
 
 ament_package()

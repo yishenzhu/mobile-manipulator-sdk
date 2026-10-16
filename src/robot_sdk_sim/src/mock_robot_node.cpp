@@ -3,9 +3,11 @@
 #include <fstream>
 #include <sstream>
 #include "robot_sdk_sim/mock_robot_node.hpp"
+#include "robot_sdk_sim/mock_world.hpp"
 #include "robot_sdk_sim/tick_action.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cerrno>
 #include <cmath>
 #include <cstdlib>
@@ -47,6 +49,29 @@ constexpr int kFeedbackEveryNTicks = 5;
 
 // 传感器：控制回路 50 Hz → 传感器 10 Hz。
 constexpr int kSensorEveryNTicks = 5;
+
+/// 从 URDF 里取某个 fixed joint 的 origin 的 xyz（传感器挂载点）。读不到返回 NaN。
+/// 与 jointSpecsFromFile 同一个动机：挂载点是机器人的属性，**不抄数字**（抄一份必然漂）。
+std::array<double, 3> originFromFile(const std::string &path, const std::string &joint_name) {
+  constexpr double nan = std::numeric_limits<double>::quiet_NaN();
+  std::array<double, 3> out{nan, nan, nan};
+  std::ifstream file(path);
+  if (!file) {
+    return out;
+  }
+  std::stringstream buffer;
+  buffer << file.rdbuf();
+  const std::string text = buffer.str();
+  const auto joint = text.find("<joint name=\"" + joint_name + "\"");
+  const auto origin = joint == std::string::npos ? std::string::npos : text.find("<origin", joint);
+  const auto xyz = origin == std::string::npos ? std::string::npos : text.find("xyz=\"", origin);
+  if (xyz == std::string::npos) {
+    return out;
+  }
+  std::istringstream values(text.substr(xyz + 5, text.find('"', xyz + 5) - xyz - 5));
+  values >> out[0] >> out[1] >> out[2];
+  return out;
+}
 // 底盘命令：超过这么久没收到新的 cmd_vel 就当停车。
 // 真底盘也这样 —— 命令丢了不该继续冲。
 constexpr double kCmdVelTimeoutS = 0.5;
@@ -54,65 +79,13 @@ constexpr double kCmdVelTimeoutS = 0.5;
 constexpr int kScanRays = 360;
 constexpr double kScanRangeMin = 0.05;
 constexpr double kScanRangeMax = 10.0;
-// 激光挂载点相对 base 的偏移 —— **必须与构造函数里那条静态 TF 一致**。
-constexpr double kLaserOffsetX = 0.1;
-constexpr double kLaserOffsetZ = 0.2; // 激光是水平的，z 不参与计算；写对是为了诚实
 
-// 模拟机器人的"世界"：一个长方体房间，**六面就是它全部的障碍物**。
-// 扫描和"前方有没有挡路的"都拿它算 —— 没有别的障碍物。
-constexpr double kRoomHalfWidth = 5.0;  // x ∈ [-5, 5]
-constexpr double kRoomHalfHeight = 4.0; // y ∈ [-4, 4]
-// 房间是有高度的：地面 z=0、天花板 z=2.5。
-// 2D 激光打不到它们（射线是水平的），但深度相机能 —— 所以相机需要三维的房间。
-constexpr double kRoomFloorZ = 0.0;
-constexpr double kRoomCeilingZ = 2.5;
+// 房间（模拟世界）与 rayToBox 都在 mock_world.hpp —— 抽出去是为了能单测纯函数。
 
 // 深度相机：尺寸小就够 —— 它是让客户"有东西可读"，不是图像质量展示。
 constexpr int kDepthWidth = 64;
 constexpr int kDepthHeight = 48;
 constexpr double kCameraHfovRad = M_PI / 3.0; // 水平视场 60°
-// 相机安装点（**必须与构造函数里那条静态 TF 一致**）：base 前 0.2、上 0.3。
-constexpr double kCameraOffsetX = 0.2;
-constexpr double kCameraOffsetZ = 0.3;
-
-/// 从 (ox,oy,oz) 沿**单位**方向射出，打在长方体房间上的距离；打不到返回 inf。
-/// 标准 slab 法：三对平行板各给一个参数区间，求交。**激光和相机共用它** ——
-/// 激光的 dz ≡ 0 等价于只看四面墙，共用一份房间模型就不会改了一个忘另一个。
-double rayToBox(double ox, double oy, double oz, double dx, double dy, double dz) {
-  const double origin[3] = {ox, oy, oz};
-  const double dir[3] = {dx, dy, dz};
-  const double lo[3] = {-kRoomHalfWidth, -kRoomHalfHeight, kRoomFloorZ};
-  const double hi[3] = {kRoomHalfWidth, kRoomHalfHeight, kRoomCeilingZ};
-
-  double t_enter = -std::numeric_limits<double>::infinity();
-  double t_exit = std::numeric_limits<double>::infinity();
-
-  for (int axis = 0; axis < 3; ++axis) {
-    if (std::abs(dir[axis]) < 1e-12) {
-      // 平行于这对板：不在两板之间就永远打不到。
-      if (origin[axis] < lo[axis] || origin[axis] > hi[axis]) {
-        return std::numeric_limits<double>::infinity();
-      }
-      continue;
-    }
-    double t1 = (lo[axis] - origin[axis]) / dir[axis];
-    double t2 = (hi[axis] - origin[axis]) / dir[axis];
-    if (t1 > t2) {
-      std::swap(t1, t2); // 方向为负时近/远会颠倒
-    }
-    t_enter = std::max(t_enter, t1);
-    t_exit = std::min(t_exit, t2);
-  }
-
-  // 区间空了（或整个盒子在身后）= 这条射线打不到墙。
-  if (t_enter > t_exit || t_exit < 0.0) {
-    return std::numeric_limits<double>::infinity();
-  }
-  // ⚠️ 关键：**相机在房间内部**，所以 t_enter 是负的，真正的墙是**出口** t_exit。
-  //    把 t_enter 初始成 0 是错的 —— max(0, 负数) 会吃掉负号，于是永远返回 0
-  //    （一整张深度图全是 0，而且不报错）。
-  return t_enter > 0.0 ? t_enter : t_exit;
-}
 
 /// 深度相机的焦距（像素）—— 由"水平视场 60°"推出来，而不是随手写个数。
 /// 像素是正方形的，所以 fx = fy。
@@ -229,26 +202,23 @@ MockRobotNode::MockRobotNode(const rclcpp::NodeOptions &options)
     }
   }
 
+  // 只发**世界位姿** map→odom→base_footprint（URDF 不可能知道"机器人在哪"）。传感器挂载点
+  // 不由本节点发 —— 它们是 URDF 的 fixed joint，归 robot_state_publisher 发到 /tf_static；
+  // 自己再发一份就是"同一个帧两个父节点" ⇒ TF_REPEATED_DATA。
   tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
-  static_tf_broadcaster_ =
-      std::make_unique<tf2_ros::StaticTransformBroadcaster>(*this);
 
-  // 传感器挂载点是**静态变换**：发布一次 → 之后一直在（transient_local）。
-  const auto stamp = now();
-  const std::string &base = config_.navigation.base_frame;
-  static_tf_broadcaster_->sendTransform(
-      makeTransform(stamp, base, laser_frame_, 0.1, 0.0, 0.2, 0.0));
-  static_tf_broadcaster_->sendTransform(
-      makeTransform(stamp, base, imu_frame_, 0.0, 0.0, 0.1, 0.0));
-  static_tf_broadcaster_->sendTransform(
-      makeTransform(stamp, base, camera_frame_, 0.2, 0.0, 0.3, 0.0));
-
-  // 相机的**光学帧**：ROS 约定图像数据是 z 朝前 / x 朝右 / y 朝下，而 body 系是
-  // x 前 / y 左 / z 上，两者差一个固定旋转 RPY(-90°, 0, -90°)。少广播这一帧，
-  // 客户拿 TF 投影深度图会得到**错误但看起来合理**的结果（本项目最怕的那类 bug）。
-  static_tf_broadcaster_->sendTransform(makeTransformRpy(
-      stamp, camera_frame_, camera_optical_frame_, 0.0, 0.0, 0.0, -M_PI / 2.0, 0.0,
-      -M_PI / 2.0));
+  // 唯一要用到挂载点的是 raycast 的**起点**（激光 x/z、相机 x/z）—— 从 URDF 读，不抄数字。
+  if (!urdf.empty()) {
+    const auto laser = originFromFile(urdf, "laser_joint");
+    const auto camera = originFromFile(urdf, "camera_joint");
+    if (!std::isnan(laser[0])) laser_mount_x_ = laser[0];
+    if (!std::isnan(laser[2])) laser_mount_z_ = laser[2];
+    if (!std::isnan(camera[0])) camera_mount_x_ = camera[0];
+    if (!std::isnan(camera[2])) camera_mount_z_ = camera[2];
+    if (std::isnan(laser[0]) || std::isnan(camera[0])) {
+      RCLCPP_WARN(get_logger(), "读不到传感器挂载点 %s —— 用编译期默认值", urdf.c_str());
+    }
+  }
 
   // 状态查询服务：按需给一份"此刻"的状态快照。
   // 它跑在**独立的互斥组**里 —— 不跟 50 Hz 控制回路抢同一条车道。
@@ -426,7 +396,7 @@ void MockRobotNode::navTick() {
         // avoid_obstacles：朝目标方向看一眼，够不够走到。挡着就停下 ——
         // 这个模拟器**不会绕路**（绕路是规划器的活），它只保证不撞。
         if (nav_.avoid_obstacles) {
-          const double wall = rayToBox(pose_.x, pose_.y, kLaserOffsetZ,
+          const double wall = rayToBox(pose_.x, pose_.y, laser_mount_z_,
                                        (nav_.target.x - pose_.x) / remaining,
                                        (nav_.target.y - pose_.y) / remaining, 0.0);
           if (wall < remaining + config_.limits.body_clearance_m) {
@@ -879,8 +849,8 @@ MockRobotNode::makeScan(std::lock_guard<std::mutex> & /*lock*/,
   scan.scan_time = static_cast<float>(kControlPeriodS * kSensorEveryNTicks);
 
   // 挂载点：相对 base 的偏移，随机器人朝向一起转。
-  const double laser_x = pose_.x + kLaserOffsetX * std::cos(pose_.yaw);
-  const double laser_y = pose_.y + kLaserOffsetX * std::sin(pose_.yaw);
+  const double laser_x = pose_.x + laser_mount_x_ * std::cos(pose_.yaw);
+  const double laser_y = pose_.y + laser_mount_x_ * std::sin(pose_.yaw);
 
   scan.ranges.reserve(kScanRays);
   for (int i = 0; i < kScanRays; ++i) {
@@ -889,7 +859,7 @@ MockRobotNode::makeScan(std::lock_guard<std::mutex> & /*lock*/,
     const double world_angle = pose_.yaw + angle;
     // 激光射线是**水平的**（dz = 0），所以地面/天花板那两项永远命中不了。
     // 与相机共用同一个 `rayToBox` —— 一份房间模型，不会改了一个忘另一个。
-    const double range = rayToBox(laser_x, laser_y, kLaserOffsetZ,
+    const double range = rayToBox(laser_x, laser_y, laser_mount_z_,
                                   std::cos(world_angle), std::sin(world_angle), 0.0);
     // 超出量程 = 没有回波。ROS 约定用 inf，不是 0、也不是 range_max。
     scan.ranges.push_back(range <= kScanRangeMax
@@ -948,10 +918,10 @@ MockRobotNode::makeDepthImage(std::lock_guard<std::mutex> & /*lock*/,
   const double cx = kDepthWidth / 2.0;
   const double cy = kDepthHeight / 2.0;
 
-  // 相机安装点：相对 base 的 (0.2, 0, 0.3)，随机器人朝向一起转。
-  const double cam_x = pose_.x + kCameraOffsetX * std::cos(pose_.yaw);
-  const double cam_y = pose_.y + kCameraOffsetX * std::sin(pose_.yaw);
-  const double cam_z = kCameraOffsetZ;
+  // 相机安装点：从 URDF 读（读不到才用编译期默认值），随机器人朝向一起转。
+  const double cam_x = pose_.x + camera_mount_x_ * std::cos(pose_.yaw);
+  const double cam_y = pose_.y + camera_mount_x_ * std::sin(pose_.yaw);
+  const double cam_z = camera_mount_z_;
   const double cos_yaw = std::cos(pose_.yaw);
   const double sin_yaw = std::sin(pose_.yaw);
 

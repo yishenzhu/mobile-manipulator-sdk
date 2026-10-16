@@ -190,6 +190,16 @@
     <origin xyz="${base_length / 2.0 - 0.01} 0 ${base_height / 2.0 + 0.05}" rpy="0 0 0"/>
   </joint>
 
+  <!-- 光学帧：ROS 约定图像在 z 朝前 / x 朝右 / y 朝下的坐标系里，与 body 系差一个固定旋转。
+       ⚠️ 它必须由 URDF 提供（fixed joint ⇒ 由 robot_state_publisher 发到 /tf_static）：
+       少了它，消费方拿 TF 投影深度图会得到"错误但看起来合理"的结果。 -->
+  <link name="camera_optical_frame"/>
+  <joint name="camera_optical_joint" type="fixed">
+    <parent link="camera_link"/>
+    <child link="camera_optical_frame"/>
+    <origin xyz="0 0 0" rpy="-1.57079632679 0 -1.57079632679"/>
+  </joint>
+
   <!-- =============================== Arm =================================== -->
   <!-- ═══ 手臂：官方 UR5 ═══════════════════════════════════════════════
        为什么是"照抄"而不是自己捏：mesh 本身就是按 UR5 的**真实尺寸**做的，
