@@ -77,6 +77,9 @@ if(BUILD_TESTING)
     target_link_libraries(test_latest_value_cache robot_sdk_core)
     ament_add_gtest(test_config test/test_config.cpp)
     target_link_libraries(test_config robot_sdk_core)
+    # state_bits / error_code 的唯一解释处（两个判据的纯函数）
+    ament_add_gtest(test_status_rules test/test_status_rules.cpp)
+    target_link_libraries(test_status_rules robot_sdk_core)
     ament_add_gtest(test_transform test/test_transform.cpp)
     target_link_libraries(test_transform robot_sdk_core)
     # 这条顺带充当 action_util.hpp 的自包含性测试 —— 它不 include 任何别的 SDK 头文件

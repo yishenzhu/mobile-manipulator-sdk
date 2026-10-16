@@ -173,7 +173,7 @@ flowchart LR
 
 | 文件 | 职责 | 字段要点 |
 |---|---|---|
-| `msg/RobotStatus.msg` | 机器人聚合状态：state 枚举（6 态）+ 电量 + 故障码 + 诊断 | `state`、`battery_percentage`、`error_code`、`uptime_seconds`、`is_estop_engaged` |
+| `msg/RobotStatus.msg` | 机器人状态**位**与遥测：state_bits 位掩码（底盘/臂在动、充电、急停、低电）+ 电量 + 故障码 | `state_bits`、`battery_percentage`、`error_code`、`uptime_seconds` |
 | `srv/GetRobotStatus.srv` | 同步状态查询（与状态话题互补） | req `include_joint_states` → resp `success/message/status/joint_states` |
 | `action/NavigateToPose.action` | 平面导航目标 | Goal `target_pose`+`max_speed`+`avoid_obstacles` |
 | `action/MoveToJointPositions.action` | 关节空间运动目标 | Goal `target`(JointState)+`max_velocity`+`max_acceleration` |

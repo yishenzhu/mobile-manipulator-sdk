@@ -204,14 +204,14 @@ const RobotStatus status = makeStatus(lock);
 
 **为什么必须共用**：不共用就是同一份事实存两份，迟早"话题说 A、服务说 B"。本类**一开始就踩过** —— 服务那份漏了 `error_code` 和 `is_estop_engaged`，靠消息默认值凑巧对了。
 
-**并且只在 `makeStatus()` 里加状态分支**：
+**并且只在 `makeStatus()` 里加状态位**（位可以同时成立 —— 旧版用 else-if 串成单值，同时动时会丢信息）：
 
 ```cpp
-if (nav_.running()) {
-  status.state = RobotStatus::STATE_NAVIGATING;
-} else if (motion_.running()) {
-  status.state = RobotStatus::STATE_MOVING;
-} else if (charging_) { ... }
+const bool base_moving = nav_.slot.running() || cmdVelActive();   // ⚠️ 覆盖 cmd_vel 这条路径
+if (base_moving)                     status.state_bits |= RobotStatus::STATE_BASE_MOVING;
+if (motion_.slot.running())          status.state_bits |= RobotStatus::STATE_ARM_MOVING;
+if (charging_)                       status.state_bits |= RobotStatus::STATE_CHARGING;
+if (battery_ < kLowBatteryThreshold) status.state_bits |= RobotStatus::STATE_BATTERY_LOW;
 ```
 
 于是"新增一个状态机"**不可能**忘记同步某个出口 —— 因为只有一个出口。

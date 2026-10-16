@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
     <name>robot_sdk_bridge</name>
-    <version>0.1.0</version>
+    <version>0.2.0</version>
     <description>
     适配层：把 SDK 的动作翻译到具体的下游后端上，客户代码不依赖 nav2_msgs / control_msgs。
     目前提供导航（SDK → Nav2）与运动（SDK → FollowJointTrajectory）。

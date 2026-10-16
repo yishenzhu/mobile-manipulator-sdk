@@ -22,6 +22,14 @@
 
 ### 变了（行为变化）
 
+- **⚠️ 破坏性：`state` 单值枚举 → `state_bits` 位掩码（`uint32`）**。旧常量 `STATE_IDLE/NAVIGATING/MOVING/…` 全删，改为
+  位：`bit0 STATE_BASE_MOVING`（底盘在动，**含 cmd_vel 路径**）、`bit1 STATE_ARM_MOVING`、`bit2 STATE_CHARGING`、
+  `bit3 STATE_ESTOP`、`bit4 STATE_BATTERY_LOW`；同时删掉与之重复的 `is_charging` / `is_battery_low` / `is_estop_engaged`。
+  ⇒ **旧单值装不下"两个独立运动通道"**（臂在动时底盘其实照常能发），而且旧版 `NAVIGATING` 漏掉了 `cmd_vel` 直接控速的情形。
+- **新增判据（请用它，别自己位运算）**：`allowsMotion()` / `allowsNavigation()`（读缓存）与自由函数
+  `motionAllowed(status)` / `navigationAllowed(status)`；**没有状态数据时一律 false**（fail-closed）。MCP 的
+  `get_status` 返回里也带上 `state_bits` / `allows_motion` / `allows_navigation`。
+
 - **超时错误更精确**：`wait_for_*` 超时时先查原因 —— 有发布端但 QoS 不兼容、或话题上没有任何发布端时，
   改报 `UNAVAILABLE` 并附具体原因（以前一律是 `TIMEOUT`）。查不出别的原因时，措辞与以前**一字不差**。
   实现见 `detail/subscription_wait.hpp`，背景见 `docs/qos.md` §6。

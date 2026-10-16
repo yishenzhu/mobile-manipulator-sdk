@@ -28,8 +28,11 @@ int main(int argc, char **argv) {
   // ① 缓存快照：等来**这一条**，字段就从它上面读 ——
   //    别一边拿着"这一条"，一边又去调 API 读"此刻最新那一条"（那是两个来源）。
   if (auto status = robot.status().waitForStatus(5s); status.ok()) {
-    std::printf("状态  : state=%u  电量=%.1f%%  充电中=%d\n", status.value()->state,
-                status.value()->battery_percentage, status.value()->is_charging);
+    const auto &s = *status.value();
+    std::printf("状态  : state_bits=0x%x  电量=%.1f%%  充电中=%d  能动臂=%d\n", s.state_bits,
+                s.battery_percentage,
+                (s.state_bits & robot_sdk::RobotStatus::STATE_CHARGING) != 0,
+                  robot_sdk::motionAllowed(s));
   } else {
     std::printf("状态  : %s\n", status.error().toString().c_str());
   }

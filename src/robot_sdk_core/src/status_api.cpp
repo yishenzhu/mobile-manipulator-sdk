@@ -113,15 +113,42 @@ rclcpp::Subscription<StatusAPI::RobotStatus>::SharedPtr StatusAPI::onStatus(
   return status_subscription_;
 }
 
+bool motionAllowed(const RobotStatus &status) {
+  // 臂在动 / 急停 / 有故障 ⇒ 不许；其余（空闲、充电中、低电）都允许 —— 充电不是禁止动作的理由。
+  constexpr uint32_t blocked = RobotStatus::STATE_ARM_MOVING | RobotStatus::STATE_ESTOP;
+  return (status.state_bits & blocked) == 0 && status.error_code == 0;
+}
+
+bool navigationAllowed(const RobotStatus &status) {
+  constexpr uint32_t blocked = RobotStatus::STATE_BASE_MOVING | RobotStatus::STATE_ESTOP;
+  return (status.state_bits & blocked) == 0 && status.error_code == 0;
+}
+
 bool StatusAPI::isHealthy() const {
   const auto current = status_cache_.latest();
   if (!current || !*current) {
     // 没有数据 ≠ 健康。宁可说"不知道"，也不给一个可能错的 true。
     return false;
   }
+  // "有没有故障"看 error_code（0 = 健康）；急停是状态位 —— 不再重复判断 ERROR 枚举。
   return (*current)->error_code == 0 &&
-         (*current)->state != RobotStatus::STATE_ERROR &&
-         !(*current)->is_estop_engaged;
+         ((*current)->state_bits & RobotStatus::STATE_ESTOP) == 0;
+}
+
+bool StatusAPI::allowsMotion() const {
+  const auto current = status_cache_.latest();
+  if (!current || !*current) {
+    return false; // fail-closed：不知道就别动（与 flock 那条原则一致）
+  }
+  return motionAllowed(**current);
+}
+
+bool StatusAPI::allowsNavigation() const {
+  const auto current = status_cache_.latest();
+  if (!current || !*current) {
+    return false;
+  }
+  return navigationAllowed(**current);
 }
 
 float StatusAPI::batteryPercentage() const {

@@ -18,6 +18,9 @@
 
 namespace robot_sdk {
 
+/// 状态消息别名：类里也有一个同名的（类内遮蔽它，互不影响）；类外的自由函数用这一个。
+using RobotStatus = robot_sdk_interfaces::msg::RobotStatus;
+
 /// 机器人的健康、电源与故障上报。状态既以流的形式推送、也能按需查询，
 /// 所以两种都提供：一份缓存的快照，以及一次请求/响应的调用。
 class StatusAPI {
@@ -64,6 +67,10 @@ class StatusAPI {
   /// 机器人健康吗？读的是**缓存里最新那条**，不是"此刻"（要此刻用 queryStatus()）。
   bool isHealthy() const;
 
+  /// 现在能不能发机械臂动作 / 底盘动作？读的是缓存里最新那条；**没数据时 false**（fail-closed）。
+  bool allowsMotion() const;
+  bool allowsNavigation() const;
+
   /// 电量百分比；状态未知时返回 NaN。
   float batteryPercentage() const;
 
@@ -85,5 +92,10 @@ class StatusAPI {
   std::mutex listeners_mutex_;
   std::vector<StatusCallback> listeners_;
 };
+
+/// `state_bits` 与 `error_code` 的**唯一解释处** —— 别在其它地方重复位运算。
+/// 作用于**一条消息**。名字故意与实例方法不同：一个读缓存、一个算给定消息，同名会混。
+bool motionAllowed(const RobotStatus& status);
+bool navigationAllowed(const RobotStatus& status);
 
 }  // namespace robot_sdk

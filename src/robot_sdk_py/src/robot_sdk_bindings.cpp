@@ -65,12 +65,14 @@ py::dict toDict(const NavigationResult& result) {
 
 py::dict toDict(const RobotStatus& status) {
   py::dict out;
-  out["state"] = status.state;
+  out["state_bits"] = status.state_bits;
   out["battery_percentage"] = status.battery_percentage;
-  out["is_charging"] = status.is_charging;
-  out["is_estop_engaged"] = status.is_estop_engaged;
+  out["battery_voltage"] = status.battery_voltage;
   out["error_code"] = status.error_code;
   out["uptime_seconds"] = status.uptime_seconds;
+  // 判据由 SDK 一处给出（含 fail-closed）—— 调用方不要自己位运算。
+  out["allows_motion"] = motionAllowed(status);
+  out["allows_navigation"] = navigationAllowed(status);
   return out;
 }
 
@@ -627,6 +629,9 @@ PYBIND11_MODULE(_robot_sdk, m) {
 
   py::class_<StatusAPI>(m, "StatusAPI")
       .def("has_status", &StatusAPI::hasStatus)
+      // 判据是类外的自由函数（作用于一条消息）；实例方法读缓存 —— 名字不同，不会混。
+      .def("allows_motion", &StatusAPI::allowsMotion)
+      .def("allows_navigation", &StatusAPI::allowsNavigation)
       .def("status", [](StatusAPI& api) { return projectOptional(api.status()); })
       .def("joint_states",
            [](StatusAPI& api) { return projectOptional(api.jointStates()); })

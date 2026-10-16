@@ -143,8 +143,7 @@ spinner.join();
 // 好：这一条自己就是完整的 —— 字段都从它读
 if (auto status = robot.status().waitForStatus(5s); status.ok()) {
   status.value()->battery_percentage;
-  status.value()->is_healthy;
-  status.value()->is_charging;
+  robot_sdk::motionAllowed(*status.value());   // 判据收在 SDK 一处，别自己位运算
 }
 
 // 差：手上拿着"这一条"，又去 API 读"此刻最新那一条" —— 两个来源

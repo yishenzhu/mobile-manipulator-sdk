@@ -351,27 +351,36 @@ MockRobotNode::makeStatus(std::lock_guard<std::mutex> & /*lock*/) const {
   RobotStatus status;
   status.header.stamp = now();
   status.header.frame_id = config_.navigation.base_frame;
-  if (nav_.slot.running()) {
-    status.state = RobotStatus::STATE_NAVIGATING;
-  } else if (motion_.slot.running()) {
-    status.state = RobotStatus::STATE_MOVING;
-  } else if (charging_) {
-    status.state = RobotStatus::STATE_CHARGING;
-  } else {
-    status.state = RobotStatus::STATE_IDLE;
+
+  // 状态**位**：两个运动通道各占一位（能同时成立）。旧版用 else-if 串成单值 ⇒ 同时动时丢信息。
+  // ⚠️ 底盘那一位要覆盖**两条**路径：导航动作，以及 cmd_vel 直接控速（Nav2 走的也是后者）。
+  const bool base_moving =
+      nav_.slot.running() ||
+      (cmd_received_ && std::chrono::steady_clock::now() - cmd_stamp_ <
+                            std::chrono::duration<double>(kCmdVelTimeoutS));
+  status.state_bits = 0;
+  if (base_moving) {
+    status.state_bits |= RobotStatus::STATE_BASE_MOVING;
+  }
+  if (motion_.slot.running()) {
+    status.state_bits |= RobotStatus::STATE_ARM_MOVING;
+  }
+  if (charging_) {
+    status.state_bits |= RobotStatus::STATE_CHARGING;
+  }
+  if (battery_ < kLowBatteryThreshold) {
+    status.state_bits |= RobotStatus::STATE_BATTERY_LOW;
   }
 
   status.battery_percentage = static_cast<float>(battery_);
-  status.is_charging = charging_;
-  status.is_battery_low = battery_ < kLowBatteryThreshold;
   status.battery_voltage = static_cast<float>(
       kBatteryNominalVoltage + kBatteryVoltagePerPercent * battery_);
   status.uptime_seconds = uptime_s_;
 
-  // 模拟机器人没有故障，也没有急停按钮 —— 显式写零，而不是靠消息默认值。
+  // 模拟机器人没有故障、也没有急停按钮 —— 显式写零，而不是靠消息默认值。
+  // （急停没有独立字段了：它就是 state_bits 里那一位；没置位即"没急停"。）
   status.error_code = 0;
   status.error_message = "";
-  status.is_estop_engaged = false;
   return status;
 }
 

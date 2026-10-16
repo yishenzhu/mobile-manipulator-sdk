@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
     <name>robot_sdk_nav2</name>
-    <version>0.1.0</version>
+    <version>0.2.0</version>
     <description>
     把 Nav2 接到 SDK 契约上的部署配置：被控对象是 mock 机器人，
     中间由 robot_sdk_bridge 翻译。不需要 Gazebo、地图和里程计话题。

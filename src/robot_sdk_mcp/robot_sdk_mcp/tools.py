@@ -33,7 +33,7 @@ async def offloaded(call):
 
 
 async def get_status(ctx: Context, timeout_s: float = 5.0, fresh: bool = False) -> dict:
-    """机器人状态：state / 电量 / 充电 / 急停 / 错误码 / 运行时长。fresh=true 走服务查询。"""
+    """机器人状态：state_bits（位掩码）/ allows_motion / allows_navigation / 电量 / 错误码 / 运行时长。fresh=true 走服务查询。"""
     api = robot_of(ctx).status()
     if fresh:
         return await offloaded(lambda: api.query_status(timeout_s))

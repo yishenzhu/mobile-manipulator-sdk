@@ -83,7 +83,7 @@
 
 | 工具（server 内名） | SDK 调用 | 主要参数 | 返回 `data` |
 |---|---|---|---|
-| `get_status` | `status.wait_for_status(t)` / `query_status(t)` | `timeout_s`, `fresh`(bool) | `state, battery_percentage, is_charging, is_estop_engaged, error_code, uptime_seconds` |
+| `get_status` | `status.wait_for_status(t)` / `query_status(t)` | `timeout_s`, `fresh`(bool) | `state_bits, allows_motion, allows_navigation, battery_percentage, error_code, uptime_seconds` |
 | `get_pose` | `navigation.current_pose(t)` | `timeout_s` | `x, y, yaw` |
 | `joint_states` | `status.wait_for_joint_states(t)` | `timeout_s` | `name[], position[]` |
 | `scan_summary` | `perception.wait_for_laser_scan(t)` + `nearest_obstacle_distance(a0,a1)` | `angle_min`, `angle_max`, `timeout_s` | `beam_count, nearest_m, angle_window` |
@@ -314,7 +314,7 @@ async def navigate_to(ctx, x, y, yaw=0.0, avoid_obstacles=True, timeout_s=60.0) 
 ### 6.2 Agent 负责要成立，得给三样东西
 
 1. **明确的结构化错误**：`UNAVAILABLE` + 原文 message，原样透出（§3.2）。
-2. **能自查"忙不忙"**：`get_status` 暴露 `state`（`RobotStatus.msg` 里 `STATE_NAVIGATING=2` / `STATE_MOVING=3`）—— 模型可**在发运动前先看状态**。
+2. **能自查"忙不忙"**：`get_status` 直接给 `allows_motion` / `allows_navigation`（**分通道** —— 旧版单值 `state` 做不到这点：臂在动时底盘其实照常能发）。要自己看就认 `state_bits` 的位。
 3. **技能里的规则**：§4.4 写明"同一时刻一个运动目标 / 先看 state / 被拒即忙"。
 
 ### 6.3 若日后发现错误码有歧义
