@@ -14,7 +14,8 @@ NavigationAPI::NavigationAPI(
     const rclcpp::Node::SharedPtr &node,
     const rclcpp::CallbackGroup::SharedPtr &callback_group,
     std::shared_ptr<TransformManager> transform, const NavigationConfig &config)
-    : node_(node), config_(config), transform_(std::move(transform)) {
+    : node_(node), config_(config), callback_group_(callback_group),
+      transform_(std::move(transform)) {
   // 相对动作名，由 rcl
   // 按节点命名空间展开；回调组决定目标/结果回调落在哪条车道。
   client_ = rclcpp_action::create_client<Action>(node_, config_.action_name,

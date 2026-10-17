@@ -15,7 +15,7 @@ PerceptionAPI::PerceptionAPI(
     const rclcpp::Node::SharedPtr &node,
     const rclcpp::CallbackGroup::SharedPtr &callback_group,
     const PerceptionConfig &config, const SubscriptionQos &sub_qos)
-    : node_(node), config_(config), qos_(sub_qos) {
+    : node_(node), config_(config), callback_group_(callback_group), qos_(sub_qos) {
   rclcpp::SubscriptionOptions options;
   // ★ 这一行决定所有传感器回调落在哪个回调组：Robot 传的是 sensor 组（Reentrant），
   //   五个高频传感器才并发。忘了传 ⇒ 落进默认组（互斥）⇒ 全部串行、静默失效、运行时不报错。

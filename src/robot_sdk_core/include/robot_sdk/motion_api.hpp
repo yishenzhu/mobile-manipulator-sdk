@@ -130,6 +130,10 @@ class MotionAPI {
 
   rclcpp::Node::SharedPtr node_;
   MotionConfig config_;
+  /// ⚠️ **必须持有**这个回调组：`node->create_callback_group()` 返回的组，节点只存
+  /// `weak_ptr`（见 rclcpp 的 `node_base.hpp`）—— 不留一份强引用，调用方一旦内联传
+  /// 临时对象，组就随语句结束析构，挂在它上面的订阅再也不会被 executor 处理。
+  rclcpp::CallbackGroup::SharedPtr callback_group_;
   std::shared_ptr<rclcpp_action::Client<Action>> client_;
   std::shared_ptr<rclcpp_action::Client<PoseAction>> pose_client_;
 

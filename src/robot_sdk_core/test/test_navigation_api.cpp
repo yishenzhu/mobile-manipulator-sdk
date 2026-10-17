@@ -277,6 +277,36 @@ TEST_F(NavigationApiTest, CancelAllToleratesDroppedGoalHandles) {
   EXPECT_NO_THROW(nav.cancelAll());
 }
 
+// 所有权回归：把回调组**内联**传进来也必须能正常派发。
+// `NavigationAPI` 必须自己持有它 —— `node->create_callback_group()` 返回的组，
+// 节点只存 `weak_ptr`（rclcpp 的 `node_base.hpp`），内联传时唯一强引用是临时对象，
+// 组会在整条语句结束后析构 ⇒ 挂在它上面的订阅再也不会被 executor 处理。
+TEST_F(NavigationApiTest, InlineCallbackGroupStillDispatches) {
+  auto node = std::make_shared<rclcpp::Node>("nav_api_inline_group");
+  auto transform = std::make_shared<TransformManager>(node);
+  auto config = fakeServerConfig();
+  config.action_name = "nav_inline_grp";
+  config.server_wait_timeout_s = 2.0;
+
+  NavigationAPI nav(node, node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive),
+                    transform, config);
+
+  auto tf = std::make_unique<tf2_ros::StaticTransformBroadcaster>(node);
+  tf->sendTransform(originTransform());
+  FakeNavigateServer server(node, config.action_name, /*hold_s=*/1.0);
+
+  rclcpp::executors::MultiThreadedExecutor executor;
+  executor.add_node(node);
+  std::thread spinner([&executor]() { executor.spin(); });
+  ASSERT_TRUE(nav.serverAvailable(2s));
+
+  auto handle = nav.goToAsync(goalAt(0.0));
+  EXPECT_TRUE(handle != nullptr) << "内联传组也要能派发成功（SDK 必须自己持有那个组）";
+
+  executor.cancel();
+  spinner.join();
+}
+
 }  // namespace
 
 }  // namespace

@@ -13,7 +13,7 @@ namespace robot_sdk {
 MotionAPI::MotionAPI(const rclcpp::Node::SharedPtr& node,
                      const rclcpp::CallbackGroup::SharedPtr& callback_group,
                      const MotionConfig& config)
-    : node_(node), config_(config) {
+    : node_(node), config_(config), callback_group_(callback_group) {
   // 相对动作名 + 显式回调组（决定目标/结果回调落在哪条车道）。
   client_ = rclcpp_action::create_client<Action>(node_, config_.action_name, callback_group);
   // 笛卡尔目标是**另一个** action，所以另起一个 client（同名会让 send_goal 话题类型撞车）。
