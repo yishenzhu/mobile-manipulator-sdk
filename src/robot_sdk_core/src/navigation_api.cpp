@@ -65,9 +65,11 @@ NavigationAPI::goToAsync(const NavigationGoal &goal,
   handle->bind(client_->async_send_goal(makeGoalMessage(goal), options),
                client_);
 
-  // 对齐 nav2：等到"接受"再返回 handle —— 之后 cancel() 一定有 goal handle 可用，
-  // 不存在"发出去但还没被接受"的空窗（那条路上取消会被静默丢掉）。
-  handle->waitForAcceptance(std::chrono::duration<double>(config_.server_wait_timeout_s));
+  // 对齐 nav2（`if not accepted: return None`）：等到"接受"才把 handle 交出去；没等到就**不交**。
+  // 交出去的话调用方的 cancel() 会静默失效 —— 那正是这次要修的洞。
+  if (!handle->waitForAcceptance(std::chrono::duration<double>(config_.server_wait_timeout_s))) {
+    return nullptr;
+  }
 
   std::lock_guard<std::mutex> lock(handles_mutex_);
   active_handles_.push_back(handle);
@@ -98,6 +100,10 @@ Result<NavigationResult> NavigationAPI::goTo(const NavigationGoal &goal) {
   const double timeout =
       goal.timeout_s > 0.0 ? goal.timeout_s : config_.default_timeout_s;
   auto handle = goToAsync(goal);
+  if (!handle) {
+    // 目标没被接受（超时或服务端拒收）—— 派发阶段就失败了，没有句柄可用。
+    return Error::Unavailable("action server did not accept the goal");
+  }
   auto wrapped = handle->wait(std::chrono::duration<double>(timeout));
   if (!wrapped.ok()) {
     return wrapped.error();

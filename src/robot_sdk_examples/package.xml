@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>robot_sdk_examples</name>
-  <version>0.2.0</version>
+  <version>0.3.0</version>
   <description>
     可直接运行的 SDK 示例：把"客户代码长什么样"摆出来。
     只依赖 robot_sdk_core，配合 robot_sdk_sim 的 mock 机器人即可跑通，不需要 Gazebo 或真机。

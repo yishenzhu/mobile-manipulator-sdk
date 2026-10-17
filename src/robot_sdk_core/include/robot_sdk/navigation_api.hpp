@@ -68,8 +68,9 @@ class NavigationAPI {
 
   bool serverAvailable(std::chrono::duration<double> timeout);
 
-  /// 非阻塞地派发目标。进度可以通过 `on_feedback` 挂，也可以稍后在返回的
-  /// 句柄上调 `onFeedback()`。
+  /// 派发目标，**等到服务端"接受"再返回**（对齐 nav2）—— 所以取消不会有"还没有 goal handle"的空窗。
+  /// ⚠️ 可能返回**空指针**：超时未被接受、或服务端拒收（超时上限 `server_wait_timeout_s`）。
+  /// 拿到后进度可以用 `on_feedback` 挂，也可以稍后在句柄上调 `onFeedback()`。
   std::shared_ptr<ActionHandle<Action>> goToAsync(const NavigationGoal& goal,
                                                   FeedbackCallback on_feedback = nullptr);
 

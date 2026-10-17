@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <package format="3">
     <name>robot_sdk_sim</name>
-    <version>0.2.0</version>
+    <version>0.3.0</version>
     <description>
     实现 Robot SDK 接口的模拟移动操作机器人。
     有了它，示例、集成测试和新手上手都不需要 Gazebo 或真机。

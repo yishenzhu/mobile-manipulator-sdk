@@ -69,8 +69,10 @@ std::shared_ptr<ActionHandle<MotionAPI::Action>> MotionAPI::moveToJointPositions
 
   handle->bind(client_->async_send_goal(message, options), client_);
 
-  // 对齐 nav2：等到"接受"再返回 handle —— 之后 cancel() 一定有 goal handle 可用。
-  handle->waitForAcceptance(std::chrono::duration<double>(config_.server_wait_timeout_s));
+  // 对齐 nav2：等到"接受"才交出去；没等到就不交（否则调用方的 cancel() 会静默失效）。
+  if (!handle->waitForAcceptance(std::chrono::duration<double>(config_.server_wait_timeout_s))) {
+    return nullptr;
+  }
 
   std::lock_guard<std::mutex> lock(handles_mutex_);
   active_handles_.push_back(handle);
@@ -87,6 +89,9 @@ Result<MotionResult> MotionAPI::moveToJointPositions(const MotionGoal& goal) {
   const double timeout = goal.timeout_s > 0.0 ? goal.timeout_s : config_.default_timeout_s;
 
   auto handle = moveToJointPositionsAsync(goal);
+  if (!handle) {
+    return Error::Unavailable("action server did not accept the goal");
+  }
   auto wrapped = handle->wait(std::chrono::duration<double>(timeout));
   if (!wrapped.ok()) {
     return wrapped.error();
@@ -137,8 +142,10 @@ std::shared_ptr<ActionHandle<MotionAPI::PoseAction>> MotionAPI::moveToPoseAsync(
 
   handle->bind(pose_client_->async_send_goal(message, options), pose_client_);
 
-  // 对齐 nav2：等到"接受"再返回 handle —— 之后 cancel() 一定有 goal handle 可用。
-  handle->waitForAcceptance(std::chrono::duration<double>(config_.server_wait_timeout_s));
+  // 对齐 nav2：等到"接受"才交出去；没等到就不交（否则调用方的 cancel() 会静默失效）。
+  if (!handle->waitForAcceptance(std::chrono::duration<double>(config_.server_wait_timeout_s))) {
+    return nullptr;
+  }
 
   std::lock_guard<std::mutex> lock(handles_mutex_);
   active_pose_handles_.push_back(handle);
@@ -149,6 +156,9 @@ Result<PoseResult> MotionAPI::moveToPose(const PoseGoal& goal) {
   const double timeout = goal.timeout_s > 0.0 ? goal.timeout_s : config_.default_timeout_s;
 
   auto handle = moveToPoseAsync(goal);
+  if (!handle) {
+    return Error::Unavailable("action server did not accept the goal");
+  }
   auto wrapped = handle->wait(std::chrono::duration<double>(timeout));
   if (!wrapped.ok()) {
     return wrapped.error();

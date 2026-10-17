@@ -97,6 +97,8 @@ class MotionAPI {
 
   bool serverAvailable(std::chrono::duration<double> timeout);
 
+  /// 派发关节目标，**等到服务端"接受"再返回**（对齐 nav2）。
+  /// ⚠️ 可能返回**空指针**：超时未被接受、或服务端拒收（超时上限 `server_wait_timeout_s`）。
   std::shared_ptr<ActionHandle<Action>> moveToJointPositionsAsync(
       const MotionGoal& goal, FeedbackCallback on_feedback = nullptr);
 
@@ -104,6 +106,7 @@ class MotionAPI {
 
   /// 笛卡尔空间运动：把末端执行器挪到 `goal.target_pose`。
   /// 走的是 `MotionConfig::pose_action_name` 那条后端 —— 和关节运动是**两个** action。
+  /// 同样**等到"接受"再返回**，因此也可能返回**空指针**（超时未被接受、或服务端拒收）。
   std::shared_ptr<ActionHandle<PoseAction>> moveToPoseAsync(
       const PoseGoal& goal, PoseFeedbackCallback on_feedback = nullptr);
 

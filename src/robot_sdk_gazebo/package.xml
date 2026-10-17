@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <package format="3">
   <name>robot_sdk_gazebo</name>
-  <version>0.2.0</version>
+  <version>0.3.0</version>
   <description>
     在 Gazebo 里跑参考机器人：起仿真、把 gz 话题桥到 ROS、广播 odom→base 的 TF。
     手臂由 ros2_control（gz_ros2_control）驱动 —— 所以 MoveIt 那条链路在这里也走得通。

@@ -7,7 +7,7 @@ package_name = "robot_sdk_tests"
 
 setup(
     name=package_name,
-    version="0.2.0",
+    version="0.3.0",
     # 显式列出目录名。**不能用 find_packages()** —— 那个靠 `__init__.py` 认包，
     # 而这里没放（目录里只有几个脚本），于是普通安装（不带 --symlink-install）
     # 会只装入口脚本、不装模块，运行时报 ModuleNotFoundError。

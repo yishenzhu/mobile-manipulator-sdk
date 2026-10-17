@@ -66,25 +66,18 @@ TEST_F(NavigationApiTest, ServerAvailableIsFalseWithoutAServer) {
   EXPECT_FALSE(nav.serverAvailable(100ms));
 }
 
-TEST_F(NavigationApiTest, CancelAllToleratesDroppedGoalHandles) {
-  auto node = std::make_shared<rclcpp::Node>("nav_api_dropped");
+// 派发阶段就失败：没有服务端 ⇒ 等不到"接受" ⇒ 返回**空指针**（对齐 nav2 的 `return None`）。
+TEST_F(NavigationApiTest, GoToAsyncReturnsNullWhenServerDoesNotAccept) {
+  auto node = std::make_shared<rclcpp::Node>("nav_api_no_accept");
   auto group = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
   auto transform = std::make_shared<TransformManager>(node);
 
   NavigationAPI nav(node, group, transform, configWithNoServer());
 
-  {
-    NavigationGoal goal;
-    goal.target = Pose2D{1.0, 2.0, 0.0};
-    // 没有服务端，这个目标会被拒绝 —— 但它仍然会被登记进 active_handles_。
-    auto handle = nav.goToAsync(goal);
-    ASSERT_TRUE(handle);
-  }  // ← 句柄在这里析构，登记项随之变成 expired
+  NavigationGoal goal;
+  goal.target = Pose2D{1.0, 2.0, 0.0};
 
-  // 这条路径会同时走 prune（expired）和"锁外 cancel"：
-  // 必须安全，不能因为句柄已死而出错。
-  EXPECT_NO_THROW(nav.cancelAll());
-  EXPECT_NO_THROW(nav.cancelAll());
+  EXPECT_EQ(nav.goToAsync(goal), nullptr);
 }
 
 // ── 行为测试：假服务端 ───────────────────────────────────────────────
@@ -267,6 +260,21 @@ TEST_F(NavigationApiTest, CancelWaitsForResponseWhenAccepted) {
   auto handle = nav.goToAsync(goalAt(5.0));
 
   EXPECT_TRUE(handle->cancel());                // 受理了 ⇒ true（等到了取消响应）
+}
+
+// cancelAll 要能容忍"登记过的句柄已经析构"：会同时走 prune（expired）和"锁外取消"。
+TEST_F(NavigationApiTest, CancelAllToleratesDroppedGoalHandles) {
+  Harness h(/*publish_tf=*/true, "fake_navigate_to_pose", /*hold_s=*/1.0);
+  NavigationAPI nav(h.node, h.group, h.transform, fakeServerConfig());
+
+  ASSERT_TRUE(nav.serverAvailable(2s));
+  {
+    auto handle = nav.goToAsync(goalAt(5.0));   // 会被接受 ⇒ 有句柄、也被登记
+    ASSERT_TRUE(handle);
+  }  // ← 句柄在这里析构，登记项随之变成 expired
+
+  EXPECT_NO_THROW(nav.cancelAll());
+  EXPECT_NO_THROW(nav.cancelAll());
 }
 
 }  // namespace

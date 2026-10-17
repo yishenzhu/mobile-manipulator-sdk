@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>robot_description</name>
-  <version>0.2.0</version>
+  <version>0.3.0</version>
   <description>
     机器人的 URDF（xacro 源）：关节的**类型、限位、速度上限**都在这里。
     这套代码里"这台机器人长什么样"只有这一个出处 —— mock 和 SDK 都从它读，
