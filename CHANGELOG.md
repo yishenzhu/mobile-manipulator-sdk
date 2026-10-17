@@ -14,17 +14,19 @@
 
 ### 修了（缺陷修复）
 
-- **`MotionAPI` / `NavigationAPI` / `PerceptionAPI` 不持有传入的回调组 ⇒ 内联传组时订阅静默失效**。
-  三者只把 `callback_group` 透传给 `create_client` / 订阅，自己不保存；而 `node->create_callback_group()`
+- **`MotionAPI` / `NavigationAPI` 不持有传入的回调组 ⇒ action 的响应收不到**。
+  两者只把 `callback_group` 透传给 `create_client`，自己不保存；而 `node->create_callback_group()`
   返回的组，**节点只存 `weak_ptr`**（rclcpp 的 `node_base.hpp`）⇒ 调用方一旦**内联**传临时对象，
-  组会在整条语句结束后析构，挂在它上面的订阅再也不会被 executor 处理。
+  组会随整条语句结束析构 ⇒ 挂在它上面的订阅再也不会被 executor 处理。
   症状很隐蔽：服务端**确实接受**了目标（`goal_callback` / `accepted_callback` 都跑了），但客户端的
   **goal response 永不回来** ⇒ `goal_future_` 不兑现 ⇒ 派发等满 `server_wait_timeout_s` 报 `kUnavailable`。
   **实测**（同一条用例内逐位二分 + 双向干预）：内联传组 ⇒ 失败 3/3；存成变量 ⇒ 成功 3/3；
-  给三个 API 加上持有 ⇒ 内联也成功，**撤掉又失败**（可逆 ⇒ 不是构建假象）。
-  修法与 `status_api` / `transform` 一致：各持有一个 `callback_group_` 成员（这三处是漏的）。
+  加上持有 ⇒ 内联也成功，**撤掉又失败**（可逆 ⇒ 不是构建假象）。
+  修法与 `status_api` / `transform` 一致：各持有一个 `callback_group_` 成员。
   回归用例：`MotionApiTest.InlineCallbackGroupStillDispatches` + `NavigationApiTest.InlineCallbackGroupStillDispatches`
   （撤掉修复时两条都会红，已验证）。
+  ⇒ **`PerceptionAPI` 也照同一写法持有了**，但**实测它的订阅并不受这个问题影响**（撤掉修复后
+  感知用例照样过 ⇒ 因此**没有**为它写回归用例，避免留下"抓不住东西的空炮"）。改动只为三者一致。
 - mock 的到位判据原先只看 xy、朝向又直接赋值 ⇒ **原地转身在 RViz 上是瞬移**；现改为限速转向 + 位姿共同判定。
 - mock 在 `remaining` 为 0（原地转身）时除零 ⇒ NaN 写进位姿，此后 **所有 TF 被 RViz 丢弃**（模型/轮子/深度图全红）；已加除零保护。
 - 可视化：RViz 缺 TF（相机/激光/底盘链）、`black` 材质重复定义、MockRobotModel 默认未启用等一串问题修复。
