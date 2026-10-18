@@ -151,11 +151,12 @@ flowchart LR
   OTB["odom_tf_broadcaster"]
   CM["controller_manager<br/>gz_ros2_control 插件自带"]
 
-  GZ -->|"/clock /odom /scan /imu /joint_states<br/>/camera/depth/*"| BR
+  GZ -->|"/clock /scan /imu<br/>/camera/depth/*"| BR
   BR --> RSP
   BR --> OTB
   BR --> ROS["ROS 侧"]
-  ROS -->|"/cmd_vel"| BR
+  ROS -->|"/cmd_vel"| CM
+  CM -->|"/odom"| ROS
   BR --> GZ
   OTB -->|"tf odom→base_footprint"| ROS
   CM -->|"/arm_controller/follow_joint_trajectory"| GZ
@@ -344,7 +345,7 @@ onDownstreamGoalResponse() / onDownstreamResult()  → slot_.finish()
 | `src/mock_robot_main.cpp` | 进程入口（多线程执行器） | `main` |
 | `include/robot_sdk_sim/tick_action.hpp` | **动作服务端每拍骨架**：加锁 / 空转 / 取消 / 终态 / 反馈 | `tickAction<Action, Advance>` |
 | `src/joint_spec.cpp` + `include/robot_sdk_sim/joint_spec.hpp` | 从 URDF 抽关节属性（可动/连续/限位/速度上限） | `jointSpecsFromFile()`、`JointSpec::limited()` |
-| `src/joint_trajectory_mock.cpp` | 替 `ros2_control` 的 **joint_trajectory_controller** | `FollowJointTrajectory` 服务端；自己发 `/joint_states` |
+| `src/joint_trajectory_mock.cpp` | 替 `ros2_control` 的 **joint_trajectory_controller** | `FollowJointTrajectory` 服务端；`publish_joint_states`（**默认 false**，单独用时由 launch 打开）|
 | `src/move_group_mock.cpp` | 替 **MoveIt 的 move_group**（不规划，只把目标摊开回显） | `MoveGroup` 服务端 + latch 话题 `fake_move_group/goal` |
 | `launch/mock_robot.launch.py` | 起 mock（可选 namespace）+ 可选 rviz2 | 参数 `namespace` / `use_sim_time` / `rviz` |
 | `rviz/mock.rviz` | RViz 配置（Fixed Frame=map） | 传感器订阅必须 **Best Effort**，否则静默无显示 |
@@ -399,7 +400,9 @@ flowchart LR
 | `joint_trajectory_mock` | `joint_trajectory_controller` | `/joint_trajectory_controller/follow_joint_trajectory` | ⚠️ 与真控制器 **同名** → 不能同起 |
 | `move_group_mock` | `move_group` | `/move_action` | ⚠️ 与真 MoveIt **同名** → 不能同起 |
 
-> ⚠️ `mock_robot_node` 和 `joint_trajectory_mock` **都发 `/joint_states`** → 同起时下游会看到两个发布者（不报错，但数据打架）。
+> ⚠️ `/joint_states` 的**单一来源**：`mock_robot_node` 是"机器人本体"，由它发 ✓；
+> `joint_trajectory_mock` 的 `publish_joint_states` **默认 false**（只在没有 mock 节点的
+> 链路里，由 launch 显式打开，例如 `motion_chain.launch.py`）—— 两条同起时也只有一个发布者。
 
 ---
 
@@ -482,7 +485,7 @@ flowchart LR
 | 文件 | 职责 | 要点 |
 |---|---|---|
 | `launch/gazebo.launch.py` | 起 gz + 桥 + robot_state_publisher + odom TF + **三个** spawner | 有序依赖：spawn 机器人要等 gz；spawn 控制器要等 controller_manager |
-| `config/ros_gz_bridge.yaml` | **7 条**话题桥（含**方向**）| 见下表 |
+| `config/ros_gz_bridge.yaml` | **6 条**话题桥（含**方向**）| 见下表 |
 | `src/odom_tf_broadcaster.cpp` | 把 `/odom` 话题补成 `odom→base_footprint` 的 TF | gz 只发话题不发 TF，Nav2 需要这条链 |
 | `worlds/sdk_demo.sdf` | 仿真世界 | 物理步长 `0.001`、平行光、50×50 地面、四面墙 + 柱子（房间尺寸须与 mock/map 一致）|
 | `README.md` | 使用说明、三条链路归属、已知坑 | — |
@@ -491,10 +494,11 @@ flowchart LR
 
 | 话题 | 方向 |
 |---|---|
-| `/clock`、`/scan`、`/imu`、`/joint_states`、`/camera/depth/*` | **GZ → ROS** |
+| `/clock`、`/scan`、`/imu`、`/camera/depth/*` | **GZ → ROS** |
 
-> ⚠️ 底盘那两条（`/cmd_vel` ROS→GZ、`/odom` GZ→ROS）**已删**：底盘改由 `diff_drive_controller`
-> 驱动后，两侧都活在 ROS 侧，再桥一遍只会多出"无人消费的 gz `/cmd_vel`"和**两个** `/odom` 作者。
+> ⚠️ `/cmd_vel`、`/odom`、`/joint_states` **都不桥**：底盘（`diff_drive_controller`）与关节状态
+> （`joint_state_broadcaster`，9 个关节含车轮）都活在 ROS 侧；再桥一遍只会多出"无人消费的 gz
+> `/cmd_vel`"、"两个 `/odom` 作者"、以及 `/joint_states` 的两套数据。
 > `/arm/*/cmd_pos` **有意不桥** —— 手臂归 `ros2_control`（`gz_ros2_control` 插件）管，不走话题桥。
 > **这条链没有起**：SLAM/AMCL（缺 `map→odom`）、Nav2、MoveIt、三个适配器、rviz。
 
@@ -609,7 +613,7 @@ flowchart LR
 |---|---|
 | `joint_trajectory_mock` ↔ 真 `joint_trajectory_controller` | 动作同名 |
 | `move_group_mock` ↔ 真 `move_group` | 动作同名（`/move_action`）|
-| `mock_robot_node` ↔ `joint_trajectory_mock` | 都发 `/joint_states` |
+| `mock_robot_node` ↔ `joint_trajectory_mock` | 同起时 `/joint_states` 仍只有一个发布者（后者 `publish_joint_states` 默认 false）|
 | 两个 `mock_robot_node`（游离残留）| 同名动作服务端不止一个 → 客户端可能收到不属于自己的回应（见 README 排障）|
 
 ---

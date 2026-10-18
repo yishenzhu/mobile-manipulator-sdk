@@ -499,39 +499,8 @@
     </gazebo>
   </xacro:macro>
 
-  <gazebo>
-    <!-- 底盘**不再**用 gz 私有的 DiffDrive 插件：车轮已纳入 ros2_control（见文件末的
-         <ros2_control>），由标准控制器 diff_drive_controller 驱动，/odom 也由它发。
-         ⇒ 底盘与手臂走**同一套**驱动机制；接真机时换的是同一个硬件插件（只换 plugin 名）。
-         ⚠️ 留着的代价是：gz DiffDrive 会和 ros2_control 抢同一个关节，并且产生**两个** /odom 源。 -->
-    <!-- ⚠️ gazebo 模式下手臂的关节状态由 ros2_control 的 broadcaster 发，这里**只补车轮** ——
-         少了它们 MoveIt 的当前状态永远不完整（一直 warn "complete state ... not yet known"）。
-         mock 模式下则由这一个插件把手臂也一起发了（那时没有 ros2_control 的广播器）。 -->
-    <xacro:if value="${'$(arg hardware)' == 'gazebo'}">
-      <plugin filename="gz-sim-joint-state-publisher-system"
-              name="gz::sim::systems::JointStatePublisher">
-        <topic>/joint_states</topic>
-        <joint_name>left_wheel_joint</joint_name>
-        <joint_name>right_wheel_joint</joint_name>
-      </plugin>
-    </xacro:if>
-    <xacro:unless value="${'$(arg hardware)' == 'gazebo'}">
-      <plugin filename="gz-sim-joint-state-publisher-system"
-              name="gz::sim::systems::JointStatePublisher">
-        <topic>/joint_states</topic>
-        <joint_name>left_wheel_joint</joint_name>
-        <joint_name>right_wheel_joint</joint_name>
-        <joint_name>shoulder_pan_joint</joint_name>
-        <joint_name>shoulder_lift_joint</joint_name>
-        <joint_name>elbow_joint</joint_name>
-        <joint_name>wrist_joint</joint_name>
-        <joint_name>wrist_pitch_joint</joint_name>
-        <joint_name>wrist_roll_joint</joint_name>
-        <joint_name>gripper_joint</joint_name>
-      </plugin>
-    </xacro:unless>
-    <!-- 传感器系统（Imu / Sensors）不在这里声明 —— 它们归世界文件（全局管理器）。 -->
-  </gazebo>
+  <!-- 关节状态统一由 controller_manager 的 joint_state_broadcaster 发（含车轮）⇒
+       这里不再挂 gz 的 JointStatePublisher：两个发布者会让 /joint_states 出现两套数据。 -->
 
   <!-- 激光与深度相机是渲染式的，需要世界里的 Sensors 系统提供渲染上下文（见 worlds/sdk_demo.sdf）。 -->
 

@@ -329,12 +329,12 @@ ros2 launch robot_sdk_gazebo gazebo.launch.py headless:=true    # 无显示器 /
 |---|---|---|---|
 | 手臂 7 关节 | `motionTick` **假插值**（命令即状态） | **`gz_ros2_control`**（真物理）+ `arm_controller` | ❌ 不过桥（启动用 `spawner`；`/joint_states` 由 `joint_state_broadcaster` 直接在 gz 进程内发进 ROS）|
 | 底盘（差速） | `cmdVelTick` **理想积分**（无加速度/无打滑） | `gz_ros2_control` + **`diff_drive_controller`**（标准 ros2_control，和手臂**同一套**机制）| ❌ 不过桥（话题都在 ROS 侧）|
-| 车轮关节状态 | （mock 不发车轮，只发臂的 7 个） | gz 的 `JointStatePublisher`（**只列车轮**）| ✅ `/joint_states` GZ→ROS |
+| 关节状态（含车轮）| （mock 自己发 `/joint_states`） | `joint_state_broadcaster`（**9 个关节，唯一发布者**）| ❌ 不过桥 |
 | 激光 | `makeScan` 射线求交 | gz `gpu_lidar` 传感器（**渲染式**，需要 EGL/GPU）| ✅ `/scan` GZ→ROS |
 | IMU | `makeImu` | gz `Imu` 系统 | ✅ `/imu` GZ→ROS |
 | 深度相机 | `makeDepthImage` 针孔投影 | gz `depth_camera` 传感器 | ✅ 三条 GZ→ROS（图/内参/点云）|
 
-**桥一共 7 条，全是 GZ→ROS**（`ros_gz_bridge.yaml`）。手臂命令**不在桥里**，底盘也不再走桥 —— 这两者都归 ros2_control（`arm_controller` / `diff_drive_controller`），只有传感器与车轮状态需要过桥。
+**桥一共 6 条，全是 GZ→ROS**（`ros_gz_bridge.yaml`），只剩传感器（`/scan`、`/imu`、深度相机三条）。手臂命令、底盘（`/cmd_vel`、`/odom`）与关节状态（`/joint_states`）都归 ros2_control，**都不走桥** ✓。
 
 ### 6.2 `odom_tf_broadcaster` 为什么存在
 

@@ -64,12 +64,12 @@ URDF 用 `hardware:=gazebo` 展开（默认 `mock` 是给 `colcon test` 的假�
 也会照样起后一个，级联更糟）；② 两个都加 `--service-call-timeout 60 --switch-timeout 60`。
 **修后连续 2 次 bring-up 都干净起来**（修前 4 次里 2 次）。
 
-**③ 车轮的关节状态 —— 已解决。** URDF 里 gz 的 `JointStatePublisher` 只发**车轮**（手臂归
-`joint_state_broadcaster`），所以 `/joint_states` 必须**桥**过来，MoveIt 的当前状态才完整。
-⚠️ 这里踩过一次并**归因错了**：最初桥上之后整栈全 `-4`，我误判成"桥导致时间戳回跳"就退掉了。
-用日志核对才发现真正的问题是 spawner 没激活控制器（即上面的问题②），而 `jump back in time`
-在**不带桥**的那轮里反而更多（3663 次 vs 1217 次）。
-②修好之后把桥加回来重测：**状态完整性警告 191 → 0、jump back in time → 0、端到端 4/4 成功**。
+**③ 车轮的关节状态 —— 已统一到单一发布者。** 以前 gz 的 `JointStatePublisher` 只发**车轮**、
+`joint_state_broadcaster` 只发手臂 ⇒ `/joint_states` 有**两个发布者**、两套数据（频率还一个
+~1 kHz、一个 50 Hz ✗）。现在 `joint_state_broadcaster` 发全部 **9 个关节**（含车轮），gz 侧的
+`JointStatePublisher` 与那条桥都已删除 ⇒ 唯一的 ~50 Hz 发布者 ✓。
+⚠️ 早前这里踩过一次并**归因错了**：桥上之后整栈全 `-4`，我误判成"桥导致时间戳回跳"就退掉了；
+用日志核对才发现真正的问题是 spawner 没激活控制器（问题②）—— 教训：**先看控制器状态，再怀疑桥** ✓。
 
 **④ 内存是硬约束。** 这台机器 5.9 GB 总、起栈后只剩 ~1 GB。同时跑 Gazebo + move_group +
 适配器已经接近上限，再叠东西会被 OOM 杀掉（表现为栈莫名其妙整体消失）。

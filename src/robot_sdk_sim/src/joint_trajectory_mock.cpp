@@ -58,7 +58,11 @@ class JointTrajectoryMock : public rclcpp::Node {
     timer_group_ = create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
     server_group_ = create_callback_group(rclcpp::CallbackGroupType::Reentrant);
 
-    joint_pub_ = create_publisher<sensor_msgs::msg::JointState>(joint_states_topic_, 10);
+    // ⚠️ 默认**不发** /joint_states：与 mock_robot_node 同起时会出现两个发布者（两套数据 ✗）。
+    //    单独用它（如 motion_chain.launch）时才由参数打开 —— 一个栈里只允许一个发布者。
+    if (declare_parameter<bool>("publish_joint_states", false)) {
+      joint_pub_ = create_publisher<sensor_msgs::msg::JointState>(joint_states_topic_, 10);
+    }
     // 控制回路与状态发布同在一条互斥车道上，彼此不并发（同 mock_robot_node）。
     tick_timer_ = create_wall_timer(std::chrono::duration<double>(kPeriodS),
                                     [this]() { tick(); }, timer_group_);
@@ -146,7 +150,9 @@ class JointTrajectoryMock : public rclcpp::Node {
     }
     msg.velocity.assign(joint_names_.size(), 0.0);
     msg.effort.assign(joint_names_.size(), 0.0);
-    joint_pub_->publish(msg);
+    if (joint_pub_) {
+      joint_pub_->publish(msg);
+    }
   }
 
   // ── 服务端回调 ──

@@ -22,6 +22,12 @@
 
 ### 修了（缺陷修复）
 
+- **mock 侧的 `/joint_states` 有重复发布者** ✗：`mock_robot_node`（机器人本体）与 `joint_trajectory_mock`
+  （假 JTC）**都发** ⇒ 同起时下游看到两套数据（与 gazebo 侧修掉的是同一类问题 ✓）。对齐业界口径
+  （一个栈一个发布者 ✓；多来源要用命名空间 ✓）：给 `joint_trajectory_mock` 加参数
+  **`publish_joint_states`，默认 `false`**，只有"没有 mock 节点"的链路（`motion_chain.launch.py`）
+  由 launch 显式打开 ✓。**实测**：两栈同起时发布者都只有 **1** 个 ✓（A：`joint_trajectory_mock`；
+  B：`mock_robot`）✓。
 - **`stop()` 早于 `spin()` 时被吃掉 ⇒ `spin()` 永久阻塞**（契约写的是"直到 `stop()` 被调用"）。
   根因是 rclcpp 的**已知竞态**（ros2/rclcpp#3172、#1454）：`stop()` 只是 `executor.cancel()`，而 `spin()`
   入口会 `spinning.exchange(true)` **无条件**覆盖那个状态。上游只在 **rolling** 修了、且改动了类布局

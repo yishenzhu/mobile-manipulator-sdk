@@ -1,22 +1,13 @@
 # gz ↔ ROS 的话题桥接，逐条写清楚（URDF 里两侧都是绝对名）。
-# ⚠️ 故意**没有** /arm/*/cmd_pos —— 手臂归 ros2_control。/joint_states **要桥**：
-# gz 的 JointStatePublisher 只发车轮，不桥的话 MoveIt 的当前状态永远不完整。
-#
-# ⚠️ 底盘那两条（/cmd_vel、/odom）**已删**：底盘现在由 ros2_control 的
-#    diff_drive_controller 驱动，两侧都活在 ROS 侧 —— 再桥一遍会导致
-#    "ROS 发 /cmd_vel → 桥回 gz → 无人消费" 和两条 /odom 打架。
+# ⚠️ 故意**没有** /arm/*/cmd_pos —— 手臂归 ros2_control。
+# ⚠️ 也**没有** /cmd_vel、/odom、/joint_states：
+#    底盘与关节状态都归 ros2_control（diff_drive_controller / joint_state_broadcaster），
+#    再桥一遍就会多出第二个发布者（/joint_states 曾因此出现两套数据）。
 
 - ros_topic_name: "/clock"
   gz_topic_name: "/clock"
   ros_type_name: "rosgraph_msgs/msg/Clock"
   gz_type_name: "gz.msgs.Clock"
-  direction: GZ_TO_ROS
-
-# 车轮的关节状态（手臂那部分由 gz 进程里的 broadcaster 直接发，不过桥）。
-- ros_topic_name: "/joint_states"
-  gz_topic_name: "/joint_states"
-  ros_type_name: "sensor_msgs/msg/JointState"
-  gz_type_name: "gz.msgs.Model"
   direction: GZ_TO_ROS
 
 # ---- 传感器 ----

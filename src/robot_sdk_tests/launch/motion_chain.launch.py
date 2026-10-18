@@ -16,10 +16,13 @@ def generate_launch_description():
     return LaunchDescription(
         [
             # ── 假的下游：说 FollowJointTrajectory 的关节轨迹控制器替身 ──
+            # ⚠️ 这条链里没有 mock_robot_node ⇒ 由它当 /joint_states 的**唯一**发布者。
+            #    （与 mock 节点同起时保持默认 false，否则会出现两个发布者 ✗）
             Node(
                 package="robot_sdk_sim",
                 executable="joint_trajectory_mock",
                 name="joint_trajectory_mock",
+                parameters=[{"publish_joint_states": True}],
                 output="screen",
             ),
             # ── 翻译层：SDK 动作 ──▶ FollowJointTrajectory ──
