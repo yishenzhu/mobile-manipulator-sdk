@@ -39,10 +39,18 @@ jobs:
         run: python3 scripts/check_contract.py
 
       - name: 装依赖（rosdep）
+        # 失败时把 rosdep 的原话写进 job summary —— 否则 CI 红了只看到 "exit code 1"，
+        # 而公开仓库的日志下载要 token ⇒ 根本看不到原因。
         run: |
-          rosdep init || true          # 镜像里可能已经 init 过
-          rosdep update
-          rosdep install --from-paths src --ignore-src -r -y
+          rosdep init || true
+          { rosdep update && rosdep install --from-paths src --ignore-src -r -y; } 2>&1 \
+            | tee /tmp/rosdep.log | tail -20
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" -ne 0 ]; then
+            { echo '### rosdep 失败（rc='"$rc"')'; echo '```'; tail -60 /tmp/rosdep.log; echo '```'; } \
+              >> "$GITHUB_STEP_SUMMARY"
+            exit "$rc"
+          fi
 
       - name: 构建
         run: |
@@ -81,10 +89,18 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: 装依赖（rosdep）
+        # 失败时把 rosdep 的原话写进 job summary —— 否则 CI 红了只看到 "exit code 1"，
+        # 而公开仓库的日志下载要 token ⇒ 根本看不到原因。
         run: |
           rosdep init || true
-          rosdep update
-          rosdep install --from-paths src --ignore-src -r -y
+          { rosdep update && rosdep install --from-paths src --ignore-src -r -y; } 2>&1 \
+            | tee /tmp/rosdep.log | tail -20
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" -ne 0 ]; then
+            { echo '### rosdep 失败（rc='"$rc"')'; echo '```'; tail -60 /tmp/rosdep.log; echo '```'; } \
+              >> "$GITHUB_STEP_SUMMARY"
+            exit "$rc"
+          fi
 
       - name: ASan + UBSan（内存错误 / 未定义行为）
         run: |
@@ -122,10 +138,18 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: 装依赖（rosdep）
+        # 失败时把 rosdep 的原话写进 job summary —— 否则 CI 红了只看到 "exit code 1"，
+        # 而公开仓库的日志下载要 token ⇒ 根本看不到原因。
         run: |
           rosdep init || true
-          rosdep update
-          rosdep install --from-paths src --ignore-src -r -y
+          { rosdep update && rosdep install --from-paths src --ignore-src -r -y; } 2>&1 \
+            | tee /tmp/rosdep.log | tail -20
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" -ne 0 ]; then
+            { echo '### rosdep 失败（rc='"$rc"')'; echo '```'; tail -60 /tmp/rosdep.log; echo '```'; } \
+              >> "$GITHUB_STEP_SUMMARY"
+            exit "$rc"
+          fi
 
       # runner 没有 GPU：gz 的激光/深度相机是**渲染式**的，缺 GL 会刷一堆错误并拖慢启动。
       # 装完再显式要求软件光栅化（llvmpipe），别去赌默认选到哪个 renderer。
