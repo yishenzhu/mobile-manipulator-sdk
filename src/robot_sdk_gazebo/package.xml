@@ -28,6 +28,13 @@
   <exec_depend>controller_manager</exec_depend>
   <exec_depend>joint_state_broadcaster</exec_depend>
   <exec_depend>joint_trajectory_controller</exec_depend>
+  <!-- 底盘：launch 里的 spawner 加载的是这个控制器类型 ⇒ 不声明的话 rosdep 不装它，
+       干净环境下 launch 起来会加载失败（本机装过所以看不出来）。 -->
+  <exec_depend>diff_drive_controller</exec_depend>
+
+  <!-- 冒烟脚本用 `ros2 control list_controllers` 判控制器状态；那是 ros2controlcli
+       提供的命令，ros:jazzy 基础镜像里**没有** ⇒ 显式声明，让 CI 的 rosdep 装进来。 -->
+  <test_depend>ros2controlcli</test_depend>
 
   <export>
     <build_type>ament_cmake</build_type>

@@ -30,6 +30,9 @@
     <exec_depend>joint_trajectory_controller</exec_depend>
     <!-- 假硬件插件（mock_components/GenericSystem）住在 ros2_control 包里。 -->
     <exec_depend>ros2_control</exec_depend>
+    <!-- URDF 里的手臂 mesh 全指向 package://ur_description/... ⇒ 不声明的话干净环境里没有它，
+         gz/可视化拿不到 mesh（本机装过所以看不出来）。xacro 只把它当字符串，所以之前没暴露。 -->
+    <exec_depend>ur_description</exec_depend>
 
     <export>
     <build_type>ament_cmake</build_type>

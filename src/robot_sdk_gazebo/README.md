@@ -40,9 +40,17 @@ URDF 用 `hardware:=gazebo` 展开（默认 `mock` 是给 `colcon test` 的假�
 
 ## ⚠️ 已知问题（别再踩）
 
-**① 它**不进** `colcon test` —— 这是有依据的决定**：headless 全套要 ~1.1 GB 可用内存、
-约 3 分钟，而且**精度依赖物理**（姿态误差实测 0.09~0.21 rad，比假硬件那条的 0.03~0.05 差得多，
-因为 gz 的位置控制器在重力下有跟踪误差）。拿它当 CI 判据会既慢又抖。
+**① 它**不进** `colcon test`，但有一条**独立的** CI 冒烟**（`.github/workflows/ci.yml` 的 `sim-smoke` job）：
+
+- **为什么不并进 `colcon test`**：headless 全套要 ~1.1 GB 可用内存，而且**精度依赖物理**
+  （姿态误差实测 0.09~0.21 rad，比假硬件那条的 0.03~0.05 差得多，因为 gz 的位置控制器在
+  重力下有跟踪误差）。把它混进单元测试那条门禁会既慢又抖。
+- **所以冒烟只做结构断言**：三个控制器都到 `active`、发一条 `/cmd_vel` 后 `/odom` 真的前进、
+  `odom → base_footprint` 可查、`/imu` 有发布者（证明 gz→ROS 的桥通了）。**不判精度** ✗。
+- 本地一条命令：`./scripts/run_sim_smoke.sh`（自己起栈、自己收摊）—— **实测整套 40 s**；
+  失败时会把 launch 日志尾部一起打出来，不用手工翻日志。
+- ⚠️ 判"桥通了"用的是 `/imu` 而**不是** `/scan`：激光与深度相机是**渲染式**的（要 EGL），
+  在无 GPU 的 runner 上会假红。这也是 CI 里那步"装软件渲染"存在的原因。
 
 **② bring-up 曾经只有约一半成功率 —— 已修（2026-09-29）。**
 症状：`spawner` 没成功，`list_controllers` 显示控制器 `unconfigured` / `inactive`
