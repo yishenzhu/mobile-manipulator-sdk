@@ -18,6 +18,10 @@ bt_navigator:
 controller_server:
   ros__parameters:
     use_sim_time: false
+    # ⚠️ 必须发 TwistStamped：Jazzy 的 diff_drive_controller **只收** stamped
+    #    （没有 use_stamped_vel 开关、也没有 unstamped 订阅）。Gazebo 那条链路的
+    #    底盘就是它驱动的；mock 节点也按 stamped 收。
+    enable_stamped_cmd_vel: true
     controller_frequency: 20.0
     min_x_velocity_threshold: 0.001
     min_y_velocity_threshold: 0.5

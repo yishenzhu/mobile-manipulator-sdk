@@ -328,17 +328,17 @@ ros2 launch robot_sdk_gazebo gazebo.launch.py headless:=true    # 无显示器 /
 | 部件 | mock 里是谁 | Gazebo 里换成了谁 | 过桥吗 |
 |---|---|---|---|
 | 手臂 7 关节 | `motionTick` **假插值**（命令即状态） | **`gz_ros2_control`**（真物理）+ `arm_controller` | ❌ 不过桥（启动用 `spawner`；`/joint_states` 由 `joint_state_broadcaster` 直接在 gz 进程内发进 ROS）|
-| 底盘（差速） | `cmdVelTick` **理想积分**（无加速度/无打滑） | gz 的 **`DiffDrive`** 插件（**没进 ros2_control**）| ✅ `/cmd_vel` **ROS→GZ**、`/odom` **GZ→ROS** |
+| 底盘（差速） | `cmdVelTick` **理想积分**（无加速度/无打滑） | `gz_ros2_control` + **`diff_drive_controller`**（标准 ros2_control，和手臂**同一套**机制）| ❌ 不过桥（话题都在 ROS 侧）|
 | 车轮关节状态 | （mock 不发车轮，只发臂的 7 个） | gz 的 `JointStatePublisher`（**只列车轮**）| ✅ `/joint_states` GZ→ROS |
 | 激光 | `makeScan` 射线求交 | gz `gpu_lidar` 传感器（**渲染式**，需要 EGL/GPU）| ✅ `/scan` GZ→ROS |
 | IMU | `makeImu` | gz `Imu` 系统 | ✅ `/imu` GZ→ROS |
 | 深度相机 | `makeDepthImage` 针孔投影 | gz `depth_camera` 传感器 | ✅ 三条 GZ→ROS（图/内参/点云）|
 
-**桥一共 9 条，只有 `/cmd_vel` 一条是 ROS→GZ**，其余 8 条都是 GZ→ROS（`ros_gz_bridge.yaml`）。手臂命令**不在桥里** —— 它归 ros2_control。
+**桥一共 7 条，全是 GZ→ROS**（`ros_gz_bridge.yaml`）。手臂命令**不在桥里**，底盘也不再走桥 —— 这两者都归 ros2_control（`arm_controller` / `diff_drive_controller`），只有传感器与车轮状态需要过桥。
 
 ### 6.2 `odom_tf_broadcaster` 为什么存在
 
-gz 的 `DiffDrive` **只发 `/odom` 话题，不发 TF**；而 Nav2 要的是 `map → odom → base` 这条**完整的 TF 链**。所以专门有个小节点把 `/odom` 抄成 `odom → base_footprint` 的 TF。
+`diff_drive_controller` **能**发 TF，但这里**故意关掉**（`enable_odom_tf: false`）—— 让 `odom → base_footprint` 只有**一个作者**：本节点（它把 `/odom` 话题抄成 TF）。Nav2 要的是 `map → odom → base` 这条**完整的 TF 链**，两个作者改同一条边，TF 树会抖。
 
 它订阅 `/odom` 用 **`SensorDataQoS`** —— 和发布端必须一致，不一致会**静默收不到**（同一个坑，第三次出现）。
 
@@ -383,7 +383,7 @@ gz 的 `DiffDrive` **只发 `/odom` 话题，不发 TF**；而 Nav2 要的是 `m
 |---|---|---|---|
 | 关节驱动 | `motionTick` 假插值 | `gz_ros2_control` 真物理 | **ros2_control 的硬件接口**（`SystemInterface`）→ 真实电机/编码器/总线（CAN/EtherCAT…）|
 | 硬件插件 | `mock_components/GenericSystem`（**命令即状态**，`open_loop_control: true`）| `gz_ros2_control/GazeboSimSystem` | 厂家/自研的硬件接口（`open_loop_control: false`）|
-| 底盘 | `cmdVelTick` 理想积分 | gz `DiffDrive` | 真实差速驱动器 |
+| 底盘 | `cmdVelTick` 理想积分 | `diff_drive_controller`（ros2_control）| 真实差速驱动器（**同一个位置换硬件插件**）|
 | 传感器 | 解析生成 | gz 渲染式传感器 | 真实驱动（噪音、丢帧、延迟、畸变都会有）|
 | **限位/能不能到** | 从 URDF 读，当场拒 | 由控制器/物理决定 | **由控制器/驱动器决定** ← 见下 |
 | 谁发 `map→odom` | mock 自己（单位变换）| 缺 | **缺，必须补**（SLAM/AMCL）|
@@ -410,10 +410,10 @@ gz 的 `DiffDrive` **只发 `/odom` 话题，不发 TF**；而 Nav2 要的是 `m
 | 谁当执行侧 | `mock_robot_node` 一个进程 | gz + `gz_ros2_control` + 桥 | 控制器 / 驱动器 + 硬件接口 |
 | 传感器来源 | 解析生成（射线求交） | gz 渲染式传感器 | 真实驱动 |
 | 手臂驱动 | 假插值（命令即状态） | 真物理（`gz_ros2_control`） | 真电机 |
-| 底盘驱动 | `cmdVelTick` 理想积分 | gz `DiffDrive` | 真差速驱动器 |
+| 底盘驱动 | `cmdVelTick` 理想积分 | `diff_drive_controller`（ros2_control）| 真差速驱动器 |
 | 谁发 `odom→base` | mock（真值位姿） | `odom_tf_broadcaster`（抄 `/odom`） | 轮式里程计 |
 | **谁发 `map→odom`** | **mock（单位变换 = 定位永远完美）** | **缺** | **缺，必须补** |
-| `/odom` 话题 | **没有**（只发 TF） | 有（gz 发、桥转发） | 有（驱动器发） |
+| `/odom` 话题 | **没有**（只发 TF） | 有（`diff_drive_controller` 发） | 有（驱动器发） |
 | 有没有噪声 | 没有（理想值） | 有（仿真级） | 有（真实级） |
 | 定位准不准 | 永远完美 | 准 | 会漂 |
 | 接 Nav2 | ✅ 能跑（`robot_sdk_nav2` 那条，本文 §9 有实测）| ❌ 缺 `map→odom` | ❌ 缺 `map→odom` |
@@ -455,7 +455,7 @@ gz 的 `DiffDrive` **只发 `/odom` 话题，不发 TF**；而 Nav2 要的是 `m
 planner_server（NavfnPlanner）──▶ /plan     （nav_msgs/Path，一条路）
                                        │
                                        ▼
-controller_server（RotationShim + RPP）──▶ /cmd_vel  （geometry_msgs/Twist，20 Hz 连续发）
+controller_server（RotationShim + RPP）──▶ /cmd_vel  （geometry_msgs/TwistStamped，20 Hz 连续发）
                                        │
                                        ▼
                                    mock 的 cmd_vel 订阅 → cmdVelTick → 改 pose_

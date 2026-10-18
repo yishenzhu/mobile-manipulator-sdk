@@ -120,6 +120,21 @@ def generate_launch_description():
              "--switch-timeout", "60"],
         output="screen",
     )
+    # 底盘：标准 diff_drive_controller（原来由 gz 的 DiffDrive 插件驱动）。
+    # ⚠️ 控制器的话题是 **~/cmd_vel** 和 **~/odom**（节点名带控制器名 ⇒
+    #    /diff_drive_controller/cmd_vel），所以必须重映射回 /cmd_vel、/odom ——
+    #    Nav2 与 odom_tf_broadcaster 认的是后面这两个名字。
+    #    ⚠️ 只给控制器传 remap 要用 spawner 的 --controller-ros-args：
+    #    controller_manager 自己带 --remap 已经**废弃**（会警告），别用那个。
+    spawn_diff_drive = ExecuteProcess(
+        cmd=["ros2", "run", "controller_manager", "spawner", "diff_drive_controller",
+             "--controller-manager", "/controller_manager",
+             "--controller-manager-timeout", "60",
+             "--service-call-timeout", "60",
+             "--switch-timeout", "60",
+             "--controller-ros-args", "-r ~/cmd_vel:=/cmd_vel -r ~/odom:=/odom"],
+        output="screen",
+    )
 
     return LaunchDescription([
         DeclareLaunchArgument(
@@ -141,5 +156,5 @@ def generate_launch_description():
         # gz_ros2_control 的插件要等机器人被生成之后才会建 controller_manager，所以推迟一点；
         # 两个 spawner 各自独立起、各自等（--controller-manager-timeout），**不串成链** ——
         # 串的话前一个失败也会照样起后一个，留下"看着活着、实则半配置"的栈（实测踩过）。
-        TimerAction(period=12.0, actions=[spawn_broadcaster, spawn_arm]),
+        TimerAction(period=12.0, actions=[spawn_broadcaster, spawn_arm, spawn_diff_drive]),
     ])

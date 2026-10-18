@@ -306,17 +306,19 @@ MockRobotNode::MockRobotNode(const rclcpp::NodeOptions &options)
 
   // 底盘命令入口。话题名是 **mock 自己的参数**（不属于 SDK 契约：客户从不发 cmd_vel），
   // 这样换 Nav2 配置时不用改代码。
+  // ⚠️ 收 **TwistStamped**：对齐 Jazzy 的 diff_drive_controller（它只收 stamped），
+  //    这样 Nav2 发的东西**同一个类型**能同时喂仿真底盘和真/仿真底盘控制器，不必再插转换节点。
   const std::string cmd_vel_topic =
       declare_parameter<std::string>("cmd_vel_topic", "cmd_vel");
   cmd_group_ = create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
   rclcpp::SubscriptionOptions cmd_options;
   cmd_options.callback_group = cmd_group_;
-  cmd_vel_sub_ = create_subscription<geometry_msgs::msg::Twist>(
+  cmd_vel_sub_ = create_subscription<geometry_msgs::msg::TwistStamped>(
       cmd_vel_topic, rclcpp::QoS(10),
-      [this](geometry_msgs::msg::Twist::ConstSharedPtr msg) {
+      [this](geometry_msgs::msg::TwistStamped::ConstSharedPtr msg) {
         std::lock_guard<std::mutex> lock(mutex_);
-        cmd_linear_ = msg->linear.x;
-        cmd_angular_ = msg->angular.z;
+        cmd_linear_ = msg->twist.linear.x;
+        cmd_angular_ = msg->twist.angular.z;
         cmd_stamp_ = std::chrono::steady_clock::now();
         cmd_received_ = true;
       },

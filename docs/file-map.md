@@ -481,8 +481,8 @@ flowchart LR
 
 | 文件 | 职责 | 要点 |
 |---|---|---|
-| `launch/gazebo.launch.py` | 起 gz + 桥 + robot_state_publisher + odom TF + 两个 spawner | 有序依赖：spawn 机器人要等 gz；spawn 控制器要等 controller_manager |
-| `config/ros_gz_bridge.yaml` | 9 条话题桥（含**方向**）| 见下表 |
+| `launch/gazebo.launch.py` | 起 gz + 桥 + robot_state_publisher + odom TF + **三个** spawner | 有序依赖：spawn 机器人要等 gz；spawn 控制器要等 controller_manager |
+| `config/ros_gz_bridge.yaml` | **7 条**话题桥（含**方向**）| 见下表 |
 | `src/odom_tf_broadcaster.cpp` | 把 `/odom` 话题补成 `odom→base_footprint` 的 TF | gz 只发话题不发 TF，Nav2 需要这条链 |
 | `worlds/sdk_demo.sdf` | 仿真世界 | 物理步长 `0.001`、平行光、50×50 地面、四面墙 + 柱子（房间尺寸须与 mock/map 一致）|
 | `README.md` | 使用说明、三条链路归属、已知坑 | — |
@@ -491,9 +491,10 @@ flowchart LR
 
 | 话题 | 方向 |
 |---|---|
-| `/clock`、`/odom`、`/scan`、`/imu`、`/joint_states`、`/camera/depth/*` | **GZ → ROS** |
-| `/cmd_vel` | **ROS → GZ** |
+| `/clock`、`/scan`、`/imu`、`/joint_states`、`/camera/depth/*` | **GZ → ROS** |
 
+> ⚠️ 底盘那两条（`/cmd_vel` ROS→GZ、`/odom` GZ→ROS）**已删**：底盘改由 `diff_drive_controller`
+> 驱动后，两侧都活在 ROS 侧，再桥一遍只会多出"无人消费的 gz `/cmd_vel`"和**两个** `/odom` 作者。
 > `/arm/*/cmd_pos` **有意不桥** —— 手臂归 `ros2_control`（`gz_ros2_control` 插件）管，不走话题桥。
 > **这条链没有起**：SLAM/AMCL（缺 `map→odom`）、Nav2、MoveIt、三个适配器、rviz。
 
@@ -577,7 +578,7 @@ flowchart LR
 | 机器人 → 客户 | `robot_status` | `RobotStatus` |
 | 机器人 → 客户 | `joint_states` | `sensor_msgs/JointState` |
 | 机器人 → 客户 | `scan` / `imu` / `camera/depth/image_raw` / `camera/depth/points` / `camera/depth/camera_info` | `sensor_msgs/*`（**Best Effort**）|
-| 任意 → 机器人 | `cmd_vel` | `geometry_msgs/Twist`（**非 SDK 契约**，参数 `cmd_vel_topic`）|
+| 任意 → 机器人 | `cmd_vel` | `geometry_msgs/TwistStamped`（**非 SDK 契约**，参数 `cmd_vel_topic`；Jazzy 的 `diff_drive_controller` 只收 stamped）|
 | TF | `map→odom`（恒等）、`odom→base_footprint`（真值）、4 条静态变换 | — |
 
 **经过适配器**（要显式加 `sdk/` 前缀）：

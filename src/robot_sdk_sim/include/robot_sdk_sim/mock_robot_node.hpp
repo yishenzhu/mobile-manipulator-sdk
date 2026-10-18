@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-#include <geometry_msgs/msg/twist.hpp>
+#include <geometry_msgs/msg/twist_stamped.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
 #include <sensor_msgs/msg/camera_info.hpp>
@@ -155,7 +155,7 @@ class MockRobotNode : public rclcpp::Node {
   rclcpp::Service<GetRobotStatus>::SharedPtr status_service_;
   rclcpp_action::Server<NavigateToPose>::SharedPtr nav_server_;
   rclcpp_action::Server<MoveToJointPositions>::SharedPtr motion_server_;
-  rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_sub_;
+  rclcpp::Subscription<geometry_msgs::msg::TwistStamped>::SharedPtr cmd_vel_sub_;
 
   /// 保护下面这些"机器人状态"成员：控制定时器写、状态/反馈读。
   std::mutex mutex_;

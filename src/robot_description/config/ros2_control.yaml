@@ -14,6 +14,11 @@ controller_manager:
       type: joint_state_broadcaster/JointStateBroadcaster
     arm_controller:
       type: joint_trajectory_controller/JointTrajectoryController
+    # 底盘改走标准控制栈（原先由 gz 私有的 DiffDrive 插件驱动）。
+    # ⚠️ 它**只收 TwistStamped**（Jazzy 起），话题是 ~/cmd_vel / ~/odom
+    #    ⇒ 由 launch 里的 spawner 用 --controller-ros-args 重映射成 /cmd_vel、/odom。
+    diff_drive_controller:
+      type: diff_drive_controller/DiffDriveController
 
 joint_state_broadcaster:
   ros__parameters:
@@ -44,3 +49,24 @@ arm_controller:
     # 假硬件没有反馈回路：命令写进去状态立刻就是它。不开这个的话控制器会等"实际位置
     # 跟上来"，而那份反馈在 mock_components 下同一拍才更新 ⇒ 白等一轮、可能报超限。
     open_loop_control: true
+
+
+# 底盘（差速）。轮距/半径必须和 URDF 里的几何**一致**：
+# 2 * wheel_offset_y = 0.37、wheel_radius = 0.055，否则里程计会系统性偏。
+diff_drive_controller:
+  ros__parameters:
+    left_wheel_names: [left_wheel_joint]
+    right_wheel_names: [right_wheel_joint]
+    wheel_separation: 0.37
+    wheel_radius: 0.055
+    odom_frame_id: odom
+    base_frame_id: base_footprint
+    # ⚠️ TF 仍由 robot_sdk_gazebo 的 odom_tf_broadcaster 独家发（它读 /odom 转成 TF）——
+    #    这里再发一份就有两个作者改同一条 odom→base，TF 树会抖。
+    enable_odom_tf: false
+    publish_rate: 50.0
+    # 仿真的车轮有真实位置反馈 ⇒ 用位置积分算里程；open_loop 只适合没有反馈的假硬件。
+    position_feedback: true
+    open_loop: false
+    # 上位机（Nav2）偶尔抖动时，超时没新速度命令就当停车 —— 真底盘也这么处理，别一直冲。
+    cmd_vel_timeout: 0.5

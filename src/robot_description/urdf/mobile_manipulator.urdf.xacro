@@ -500,21 +500,10 @@
   </xacro:macro>
 
   <gazebo>
-    <plugin filename="gz-sim-diff-drive-system" name="gz::sim::systems::DiffDrive">
-      <left_joint>left_wheel_joint</left_joint>
-      <right_joint>right_wheel_joint</right_joint>
-      <wheel_separation>${2.0 * wheel_offset_y}</wheel_separation>
-      <wheel_radius>${wheel_radius}</wheel_radius>
-      <max_linear_acceleration>1.0</max_linear_acceleration>
-      <min_linear_acceleration>-1.0</min_linear_acceleration>
-      <max_angular_acceleration>2.0</max_angular_acceleration>
-      <min_angular_acceleration>-2.0</min_angular_acceleration>
-      <topic>/cmd_vel</topic>
-      <odom_topic>/odom</odom_topic>
-      <frame_id>odom</frame_id>
-      <child_frame_id>base_footprint</child_frame_id>
-      <odom_publish_frequency>50</odom_publish_frequency>
-    </plugin>
+    <!-- 底盘**不再**用 gz 私有的 DiffDrive 插件：车轮已纳入 ros2_control（见文件末的
+         <ros2_control>），由标准控制器 diff_drive_controller 驱动，/odom 也由它发。
+         ⇒ 底盘与手臂走**同一套**驱动机制；接真机时换的是同一个硬件插件（只换 plugin 名）。
+         ⚠️ 留着的代价是：gz DiffDrive 会和 ros2_control 抢同一个关节，并且产生**两个** /odom 源。 -->
     <!-- ⚠️ gazebo 模式下手臂的关节状态由 ros2_control 的 broadcaster 发，这里**只补车轮** ——
          少了它们 MoveIt 的当前状态永远不完整（一直 warn "complete state ... not yet known"）。
          mock 模式下则由这一个插件把手臂也一起发了（那时没有 ros2_control 的广播器）。 -->
@@ -640,9 +629,13 @@
   </gazebo>
   </xacro:if>
   <!-- ============================ ros2_control ============================= -->
-  <!-- 给 ros2_control 用的：声明关节、接口、硬件插件，只声明要控的 7 个（车轮没人控）。
+  <!-- 给 ros2_control 用的：声明关节、接口、硬件插件。手臂 7 个 + 车轮 2 个。
+       ⚠️ 车轮用**速度**接口（差速底盘本来就是速度控制），手臂用位置接口。
        ⚠️ 插件由 `hardware` 参数二选一 —— 默认 mock（假硬件，命令即状态，不需要 Gazebo）；
-       gazebo 模式换成 gz_ros2_control，那时 MoveIt 才能**真的**驱动仿真里的机器人。 -->
+       gazebo 模式换成 gz_ros2_control，那时 MoveIt 才能**真的**驱动仿真里的机器人，
+       车轮也才由 diff_drive_controller 驱动（见 config/ros2_control.yaml）。
+       ⚠️ 车轮的 /joint_states 仍由 gz 的 JointStatePublisher 经桥发出（下面 <gazebo> 里），
+          所以 `joint_state_broadcaster` 只列手臂 —— 否则同一个关节会有两个发布者。 -->
   <ros2_control name="mobile_manipulator" type="system">
     <hardware>
       <xacro:if value="${'$(arg hardware)' == 'gazebo'}">
@@ -679,6 +672,17 @@
     <joint name="gripper_joint">
       <command_interface name="position"/>
       <state_interface name="position"/>
+    </joint>
+    <!-- 车轮：差速底盘用速度接口；状态给 position（里程计要积分它）+ velocity。 -->
+    <joint name="left_wheel_joint">
+      <command_interface name="velocity"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+    <joint name="right_wheel_joint">
+      <command_interface name="velocity"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
     </joint>
   </ros2_control>
 

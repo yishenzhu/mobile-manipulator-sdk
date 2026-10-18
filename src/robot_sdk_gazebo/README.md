@@ -23,7 +23,7 @@ ros2 run robot_sdk_bridge moveit_adapter --ros-args \
 | 部件 | 谁驱动 |
 |---|---|
 | 手臂 7 个关节 | ros2_control（`gz_ros2_control/GazeboSimSystem`）⇒ MoveIt 能直接驱 |
-| 底盘（差速） | gz 的 `DiffDrive`（**没**进 ros2_control）⇒ 走 `/cmd_vel`、`/odom` 两条桥 |
+| 底盘（差速） | ros2_control（`gz_ros2_control` + **`diff_drive_controller`**，与手臂同一套机制）⇒ 控制器话题重映射回 `/cmd_vel`、`/odom` |
 | 激光 / IMU / 深度相机 | gz 的 Sensors 系统 ⇒ 过桥 |
 
 URDF 用 `hardware:=gazebo` 展开（默认 `mock` 是给 `colcon test` 的假硬件那条）。

@@ -112,7 +112,7 @@
 
 #### 它**多听**了一样东西：`cmd_vel`
 
-mock 订阅 `cmd_vel`（`geometry_msgs/Twist`），按它推进位姿 —— 这样 **Nav2** 这类"出口就是 `cmd_vel`"的导航栈可以直接驱动它。
+mock 订阅 `cmd_vel`（`geometry_msgs/TwistStamped` —— 对齐 Jazzy 的 `diff_drive_controller`，它**只收** stamped），按它推进位姿 —— 这样 **Nav2** 这类"出口就是 `cmd_vel`"的导航栈可以直接驱动它。
 
 **但它不属于 SDK 契约**（客户从不发 `cmd_vel`）—— 它是**机器人内部的总线**。所以：
 
