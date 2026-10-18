@@ -10,6 +10,10 @@
     <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
     <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"/>
     <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/>
+    <!-- 传感器系统归世界（全局管理器，一个实例统管全部传感器）；放两处会各发一遍、频率翻倍。 -->
+    <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
     <plugin filename="gz-sim-imu-system" name="gz::sim::systems::Imu"/>
 
     <light type="directional" name="sun">

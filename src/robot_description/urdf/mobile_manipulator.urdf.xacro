@@ -530,17 +530,10 @@
         <joint_name>gripper_joint</joint_name>
       </plugin>
     </xacro:unless>
-    <plugin filename="gz-sim-imu-system" name="gz::sim::systems::Imu"/>
+    <!-- 传感器系统（Imu / Sensors）不在这里声明 —— 它们归世界文件（全局管理器）。 -->
   </gazebo>
 
-  <!-- Both the lidar and the depth camera are rendering-based, so the Sensors
-       system always needs a rendering context. enable_camera only controls
-       whether the depth camera sensor is spawned. -->
-  <gazebo>
-    <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors">
-      <render_engine>ogre2</render_engine>
-    </plugin>
-  </gazebo>
+  <!-- 激光与深度相机是渲染式的，需要世界里的 Sensors 系统提供渲染上下文（见 worlds/sdk_demo.sdf）。 -->
 
   <!-- ⚠️ 这些 gz 关节位置控制器只在 mock 模式下保留；gazebo 模式下手臂归 ros2_control，
        两份一起放进 Gazebo 会**抢同一个关节**。 -->

@@ -28,6 +28,10 @@ ros2 run robot_sdk_bridge moveit_adapter --ros-args \
 
 URDF 用 `hardware:=gazebo` 展开（默认 `mock` 是给 `colcon test` 的假硬件那条）。
 
+⚠️ **传感器系统（`Sensors` / `Imu`）声明在 world 里，不在 URDF**：它们是"一个世界一个实例"的全局
+管理器（见 gz-sim 官方世界与 Articulated Robotics 的世界模板）；写两处会起两个实例 ⇒ 同一条数据发两遍、
+频率翻倍（实测 `/imu` 200 Hz vs 声明 100）。URDF 里只留 `<sensor>` 本体。
+
 ## 实测到什么程度
 
 ```
