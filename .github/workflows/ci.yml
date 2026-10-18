@@ -41,16 +41,15 @@ jobs:
       - name: 装依赖（rosdep）
         # 失败时把 rosdep 的原话写进 job summary —— 否则 CI 红了只看到 "exit code 1"，
         # 而公开仓库的日志下载要 token ⇒ 根本看不到原因。
+        # ⚠️ 容器里默认 shell 不是 bash、没有 PIPESTATUS ⇒ 这里只用 POSIX 语法（实测栽过一次）。
         run: |
           rosdep init || true
-          { rosdep update && rosdep install --from-paths src --ignore-src -r -y; } 2>&1 \
-            | tee /tmp/rosdep.log | tail -20
-          rc=${PIPESTATUS[0]}
-          if [ "$rc" -ne 0 ]; then
-            { echo '### rosdep 失败（rc='"$rc"')'; echo '```'; tail -60 /tmp/rosdep.log; echo '```'; } \
-              >> "$GITHUB_STEP_SUMMARY"
-            exit "$rc"
+          if ! out="$( { rosdep update && rosdep install --from-paths src --ignore-src -r -y; } 2>&1 )"; then
+            printf '%s\n' "$out" | tail -20
+            { echo '### rosdep 失败'; echo '```'; printf '%s\n' "$out" | tail -60; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
           fi
+          printf '%s\n' "$out" | tail -5
 
       - name: 构建
         run: |
@@ -91,16 +90,15 @@ jobs:
       - name: 装依赖（rosdep）
         # 失败时把 rosdep 的原话写进 job summary —— 否则 CI 红了只看到 "exit code 1"，
         # 而公开仓库的日志下载要 token ⇒ 根本看不到原因。
+        # ⚠️ 容器里默认 shell 不是 bash、没有 PIPESTATUS ⇒ 这里只用 POSIX 语法（实测栽过一次）。
         run: |
           rosdep init || true
-          { rosdep update && rosdep install --from-paths src --ignore-src -r -y; } 2>&1 \
-            | tee /tmp/rosdep.log | tail -20
-          rc=${PIPESTATUS[0]}
-          if [ "$rc" -ne 0 ]; then
-            { echo '### rosdep 失败（rc='"$rc"')'; echo '```'; tail -60 /tmp/rosdep.log; echo '```'; } \
-              >> "$GITHUB_STEP_SUMMARY"
-            exit "$rc"
+          if ! out="$( { rosdep update && rosdep install --from-paths src --ignore-src -r -y; } 2>&1 )"; then
+            printf '%s\n' "$out" | tail -20
+            { echo '### rosdep 失败'; echo '```'; printf '%s\n' "$out" | tail -60; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
           fi
+          printf '%s\n' "$out" | tail -5
 
       - name: ASan + UBSan（内存错误 / 未定义行为）
         run: |
@@ -140,16 +138,15 @@ jobs:
       - name: 装依赖（rosdep）
         # 失败时把 rosdep 的原话写进 job summary —— 否则 CI 红了只看到 "exit code 1"，
         # 而公开仓库的日志下载要 token ⇒ 根本看不到原因。
+        # ⚠️ 容器里默认 shell 不是 bash、没有 PIPESTATUS ⇒ 这里只用 POSIX 语法（实测栽过一次）。
         run: |
           rosdep init || true
-          { rosdep update && rosdep install --from-paths src --ignore-src -r -y; } 2>&1 \
-            | tee /tmp/rosdep.log | tail -20
-          rc=${PIPESTATUS[0]}
-          if [ "$rc" -ne 0 ]; then
-            { echo '### rosdep 失败（rc='"$rc"')'; echo '```'; tail -60 /tmp/rosdep.log; echo '```'; } \
-              >> "$GITHUB_STEP_SUMMARY"
-            exit "$rc"
+          if ! out="$( { rosdep update && rosdep install --from-paths src --ignore-src -r -y; } 2>&1 )"; then
+            printf '%s\n' "$out" | tail -20
+            { echo '### rosdep 失败'; echo '```'; printf '%s\n' "$out" | tail -60; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
           fi
+          printf '%s\n' "$out" | tail -5
 
       # runner 没有 GPU：gz 的激光/深度相机是**渲染式**的，缺 GL 会刷一堆错误并拖慢启动。
       # 装完再显式要求软件光栅化（llvmpipe），别去赌默认选到哪个 renderer。
