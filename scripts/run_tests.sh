@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # 跑测试并把结果**按时间戳留档**，再把失败的测试名直接打出来（不用翻 XML）。
 # 不这么做的话，一轮通过的重跑会覆盖掉上一轮失败的证据 —— robot_sdk_tests 有已知的时序 flake，吃过这个亏。
+# ⚠️ 已知 flake（单跑都能过，别当回归）：test_motion_busy_and_cancel（"取消该被受理"）、
+#    test_pose_real_stack（MoveIt error_code=99999）。失败时先单跑复现，再怀疑自己的改动。
 # ⚠️ 只用 -e pipefail：ROS 的 setup.bash 会引用未定义变量，加 -u 会当场崩（实测）。
 set -eo pipefail
 
