@@ -227,8 +227,8 @@ flowchart LR
 
 | 文件 | 职责 | 关键函数 |
 |---|---|---|
-| `src/robot.cpp` | **唯一装配点**：建 TransformManager + 四个 API，把 spin 转给 runtime | `Robot(...)`、`spin/spinSome/stop` |
-| `src/runtime.cpp` | 建节点（注入 `use_sim_time`）、三个回调组、多线程执行器 | `RobotRuntime::setup/spin/spinSome/stop` |
+| `src/robot.cpp` | **唯一装配点**：建 TransformManager + 四个 API，把 spin 转给 runtime | `Robot(...)`、`spin/spinOnce/stop` |
+| `src/runtime.cpp` | 建节点（注入 `use_sim_time`）、三个回调组、多线程执行器 | `RobotRuntime::setup/spin/spinOnce/stop` |
 | `src/config.cpp` | `fromNode`：声明并读回镜像结构体路径的参数名 | `getExistingOrDeclare` |
 | `src/navigation_api.cpp` | 发导航目标、翻译反馈/结果、`currentPose` 走 TF | `goToAsync`、`toResult`、`currentPose` |
 | `src/motion_api.cpp` | 两个 action 客户端 + 参数校验 + 取消 | `validate`、`moveToPoseAsync`、`cancelAll` |

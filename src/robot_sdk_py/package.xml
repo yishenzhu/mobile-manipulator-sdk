@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <package format="3">
   <name>robot_sdk_py</name>
-  <version>0.3.0</version>
+  <version>0.4.0</version>
   <description>
     Robot SDK 的 Python 绑定（pybind11）。**只有一个实现**：Python 和 C++ 调的是同一份核心。
     C++ 侧刻意不用异常（实时性 + 跨语言安全），所以异常只在**语言边界**上抛成 RobotSdkError。

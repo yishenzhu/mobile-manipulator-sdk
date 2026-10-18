@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <package format="3">
     <name>robot_sdk_interfaces</name>
-    <version>0.3.0</version>
+    <version>0.4.0</version>
     <description>Hardware-agnostic contracts for the Robot SDK.</description>
     <maintainer email="3464428214@qq.com">Robot SDK</maintainer>
     <license>Apache-2.0</license>

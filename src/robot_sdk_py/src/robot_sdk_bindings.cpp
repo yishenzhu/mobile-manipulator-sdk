@@ -696,7 +696,7 @@ PYBIND11_MODULE(_robot_sdk, m) {
       .def("owns_executor", &Robot::ownsExecutor)
       // ⚠️ spin() 会阻塞，而且**必须放开 GIL** —— 否则后台线程转不动、阻塞式 API 全死锁。
       .def("spin", &Robot::spin, py::call_guard<py::gil_scoped_release>())
-      .def("spin_some", &Robot::spinSome, py::arg("timeout_ms"),
+      .def("spin_once", &Robot::spinOnce, py::arg("timeout_ms"),
            py::call_guard<py::gil_scoped_release>())
       .def("stop", &Robot::stop);
 }

@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <package format="3">
   <name>robot_sdk_mcp</name>
-  <version>0.3.0</version>
+  <version>0.4.0</version>
   <description>
     把 Robot SDK 的导航 / 运动 / 感知 / 状态四类能力暴露成 MCP 工具，供 Agent 驱动。
     只做翻译，不做审批 / 重试 / 并发策略。

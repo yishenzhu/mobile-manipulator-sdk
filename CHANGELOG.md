@@ -6,6 +6,14 @@
 
 ## [Unreleased]
 
+### 改了（破坏性 ⚠️）
+
+- **`Robot::spinSome(timeout)` → `Robot::spinOnce(timeout)`**（Python：`spin_some` → `spin_once`）。
+  原名字借的是 ROS 的 `spin_some`（*= 把**当前就绪**的项全部干完、立即返回*），但实现是
+  `executor_->spin_once(timeout)`（*= 最多等 `timeout`、**只干一个***）—— **名字和行为不一致** ✗。
+  改名后与 rclcpp 的 `spin_once` / rclpy 的 `spin_once` 对齐 ✓。**语义与实现未变** ✓。
+  ⚠️ 破坏性：C++ 与 Python 的公开名字都变了 ⇒ 版本 **0.3.0 → 0.4.0**。
+
 ### 加了（新能力）
 
 - **唯一性守卫**：mock 默认只允许「本机 + 本域」跑一个实例（`$XDG_RUNTIME_DIR` 下的 `flock` 锁文件；
@@ -14,6 +22,14 @@
 
 ### 修了（缺陷修复）
 
+- **`stop()` 早于 `spin()` 时被吃掉 ⇒ `spin()` 永久阻塞**（契约写的是"直到 `stop()` 被调用"）。
+  根因是 rclcpp 的**已知竞态**（ros2/rclcpp#3172、#1454）：`stop()` 只是 `executor.cancel()`，而 `spin()`
+  入口会 `spinning.exchange(true)` **无条件**覆盖那个状态。上游只在 **rolling** 修了、且改动了类布局
+  ⇒ jazzy/kilted/lyrical 都拿不到（各分支源码逐一核对过）⇒ SDK 侧自兜：`RobotRuntime::stop_requested_`。
+  语义与上游修法一致（**意图只消费一次**）：`stop(); spin()` 立即返回 ✓，之后还能再 spin() ✓。
+  **实测**：删掉 `test_robot_lifecycle.cpp` 里那句 workaround sleep ⇒ 立刻挂死（exit 124，并连带报
+  "guard condition: the given context is not valid"）；装上守卫后 `StopBeforeSpinIsHonored` 68 ms 返回 ✓；
+  撤掉守卫 ⇒ 两条新用例如实报红（~2 s）且**不挂死** ✓。
 - **`MotionAPI` / `NavigationAPI` 不持有传入的回调组 ⇒ action 的响应收不到**。
   两者只把 `callback_group` 透传给 `create_client`，自己不保存；而 `node->create_callback_group()`
   返回的组，**节点只存 `weak_ptr`**（rclcpp 的 `node_base.hpp`）⇒ 调用方一旦**内联**传临时对象，

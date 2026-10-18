@@ -44,7 +44,7 @@ class Robot {
   void spin();
 
   /// 最多驱动 `timeout` 时间的回调。寄生模式下是 no-op。
-  void spinSome(std::chrono::milliseconds timeout);
+  void spinOnce(std::chrono::milliseconds timeout);
 
   /// 让 `spin()` 返回。
   void stop();

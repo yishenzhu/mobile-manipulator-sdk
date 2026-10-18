@@ -445,7 +445,7 @@ ros2 run robot_sdk_examples demo_motion sdk/move_to_joint_positions   # 客户�
 
 ```cpp
 robot.spin();                          // 一直值班（阻塞，直到 stop()）
-robot.spinSome(std::chrono::milliseconds(100));  // 值 100 毫秒的班就下班
+robot.spinOnce(std::chrono::milliseconds(100));  // 值 100 毫秒的班就下班
 ```
 
 > **回调不是被"派"下去的，是工人自己"抢"来的。** 这个区别决定了 §4.3。
@@ -580,7 +580,7 @@ StatusAPI&       status();
 TransformManager& tf();                                  // 坐标变换
 
 void spin();                                             // 阻塞值班
-void spinSome(std::chrono::milliseconds timeout);        // 值一会儿班
+void spinOnce(std::chrono::milliseconds timeout);        // 值一会儿班
 void stop();                                             // 让 spin 返回
 bool ownsExecutor() const;                               // 执行器是不是我建的？
 ```

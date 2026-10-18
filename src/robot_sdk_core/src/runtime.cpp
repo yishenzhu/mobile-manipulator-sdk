@@ -38,22 +38,37 @@ void RobotRuntime::setup() {
   status_group_ = node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
 }
 
-void RobotRuntime::spinSome(std::chrono::milliseconds timeout) {
+void RobotRuntime::spinOnce(std::chrono::milliseconds timeout) {
   // 寄生模式下没有自己的执行器：静默返回。
   // 抢别人的执行器是错的 —— 同一个节点被两个执行器 spin 是未定义行为。
   if (!executor_) {
+    return;
+  }
+  // 停过就别再驱动回调（这里**不消费**意图，留给 spin()）。
+  if (stop_requested_.load()) {
     return;
   }
   executor_->spin_once(timeout);
 }
 
 void RobotRuntime::spin() {
+  // stop() 先到 ⇒ 本次立即返回。**消费掉**意图、不永久粘住 —— 与 rclcpp rolling 的修法一致：
+  // 既满足"stop() 让 spin() 返回"，又保留"停过之后还能再 spin()"这个合法用法。
+  if (stop_requested_.exchange(false)) {
+    return;
+  }
   if (executor_) {
     executor_->spin();
+    // 运行期间收到的 stop：cancel() 已经让它返回 ⇒ 这里把它消费掉，别漏给下一次 spin()。
+    // （于是规则自洽：spin() 返回时 stop_requested_ 必为 false。）
+    stop_requested_.store(false);
   }
 }
 
 void RobotRuntime::stop() {
+  // ⚠️ 顺序不能反：先记意图、再叫停。
+  // 只靠 executor.cancel() 的话，早到的 stop 会被 spin() 入口的 spinning.exchange(true) 覆盖掉。
+  stop_requested_.store(true);
   if (executor_) {
     executor_->cancel();
   }

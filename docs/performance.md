@@ -59,7 +59,7 @@
 真后端的耗时是**规划/执行**时间（Nav2 一条导航、MoveIt 一次规划），那是另一个量级、另一份账。
 
 **④ GIL：spin 不会掐住 Python（比值 1.08）。** 这不是巧合，是绑定里两处刻意的设计：
-`spin()/spin_some()` 用 `py::call_guard<py::gil_scoped_release>()`，所有会阻塞的调用（`wait_for_*`、动作、`server_available`）都用 `withoutGil()` 包着。
+`spin()/spin_once()` 用 `py::call_guard<py::gil_scoped_release>()`，所有会阻塞的调用（`wait_for_*`、动作、`server_available`）都用 `withoutGil()` 包着。
 ⇒ **这条是 MCP 那侧用 `asyncio.to_thread` 的前提**：GIL 不放开的话，"多个工具并发调用"会全部串在一个 GIL 上，多线程纯属自欺。
 （代价：GIL 释放/重取本身有开销，所以**廉价缓存读刻意不放开** —— 几微秒的调用不值得为它付这个。）
 

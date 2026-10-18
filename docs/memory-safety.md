@@ -73,9 +73,11 @@ CI 里是独立的 `sanitizers` job（见 `.github/workflows/ci.yml`），与主
 1. **SDK 不持有调用方传入的回调组** ⇒ 内联传 `node->create_callback_group(...)` 时组会随语句结束析构，
    action 的 goal response 再也回不来（详见 CHANGELOG 与 `docs/contract.md`）。
    根因是 rclcpp 的节点对这类组**只存 `weak_ptr`**（`node_base.hpp`）。
-2. **`stop()` 早于 `spin()` 进入时会被吃掉** ⇒ `spin()` 永久阻塞（`stop()` 只是 `executor.cancel()`，
-   而 rclcpp 的 `spin()` 会重置该状态）。契约写的是"直到 `stop()` 被调用"，实现没满足。
-   已写进 `test_robot_lifecycle.cpp` 的注释；**没有改产品行为**。
+2. **`stop()` 早于 `spin()` 进入时会被吃掉** ⇒ `spin()` 永久阻塞 —— **已修**（`RobotRuntime::stop_requested_`）。
+   根因是 **rclcpp 的已知竞态**（ros2/rclcpp#3172、#1454）：`stop()` 只是 `executor.cancel()`，而 `spin()`
+   入口会 `spinning.exchange(true)` **无条件**覆盖那个状态。上游只在 **rolling** 修了、且改动了类布局
+   ⇒ jazzy/kilted/lyrical 都拿不到（实测：删掉测试里那句 workaround 立刻挂死，exit 124）。
+   我们的语义与上游修法一致：**stop 意图只消费一次** —— `stop(); spin()` 立即返回 ✓，之后还能再 spin() ✓。
 
 ---
 

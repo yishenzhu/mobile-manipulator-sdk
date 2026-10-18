@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <chrono>
 #include <memory>
 
@@ -30,12 +31,15 @@ class RobotRuntime {
   /// 执行器是不是我自己建的？（寄生模式下为 false，此时 spin() 是空操作）
   bool ownsExecutor() const { return static_cast<bool>(executor_); }
 
-  /// 最多驱动 timeout 时间的回调。
-  void spinSome(std::chrono::milliseconds timeout);
+  /// 最多驱动 timeout 时间的回调。stop() 之后立即返回（**不消费** stop 意图，留给 spin()）。
+  void spinOnce(std::chrono::milliseconds timeout);
 
   /// 一直驱动回调，直到 stop() 被调用。寄生模式下是空操作。
+  /// ⚠️ stop() 的意图**只消费一次**：stop() 先到 ⇒ 本次 spin() 立即返回；**之后还能再 spin()**。
+  ///    语义对齐 rclcpp rolling 的修法（jazzy/kilted/lyrical 都还没有该修复，见下面成员注释）。
   void spin();
 
+  /// 让当前/下一次 spin() 返回。幂等。
   void stop();
 
  private:
@@ -47,6 +51,10 @@ class RobotRuntime {
   rclcpp::CallbackGroup::SharedPtr sensor_group_;
   rclcpp::CallbackGroup::SharedPtr status_group_;
   std::shared_ptr<rclcpp::executors::MultiThreadedExecutor> executor_;
+  /// ⚠️ 必须自己记"要停"：`stop()` 只是 `executor.cancel()`，而 rclcpp 的 spin() 入口会
+  ///    `spinning.exchange(true)` **无条件**覆盖那个状态 ⇒ 早到的 stop 被吃掉、spin() 永久阻塞
+  ///    （rclcpp#3172；上游只在 rolling 修了，改动类布局 ⇒ jazzy/kilted/lyrical 都拿不到）。
+  std::atomic<bool> stop_requested_{false};
 };
 
 }  // namespace robot_sdk

@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>robot_sdk_tests</name>
-  <version>0.3.0</version>
+  <version>0.4.0</version>
   <description>
     跨包的验收探针：验的是**行为**（忙时拒收、取消、折角、避障预检、加速度生效），
     不是单个函数 —— 那些在 robot_sdk_core 的单元测试里。

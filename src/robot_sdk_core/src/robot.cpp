@@ -51,7 +51,7 @@ bool Robot::ownsExecutor() const { return runtime_->ownsExecutor(); }
 // ---------------------------------------------------------------------------
 void Robot::spin() { runtime_->spin(); }
 
-void Robot::spinSome(std::chrono::milliseconds timeout) { runtime_->spinSome(timeout); }
+void Robot::spinOnce(std::chrono::milliseconds timeout) { runtime_->spinOnce(timeout); }
 
 void Robot::stop() { runtime_->stop(); }
 
