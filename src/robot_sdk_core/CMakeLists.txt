@@ -100,6 +100,9 @@ if(BUILD_TESTING)
     ament_add_gtest(test_motion_api test/test_motion_api.cpp)
     target_link_libraries(test_motion_api robot_sdk_core)
     # 这条顺带充当 robot_sdk.hpp（umbrella）的自包含性测试
+    # 生命周期压力：反复构造/析构 Robot（价值主要在 ASan/UBSan 构建下）
+    ament_add_gtest(test_robot_lifecycle test/test_robot_lifecycle.cpp)
+    target_link_libraries(test_robot_lifecycle robot_sdk_core)
     ament_add_gtest(test_robot test/test_robot.cpp)
     target_link_libraries(test_robot robot_sdk_core)
 endif()

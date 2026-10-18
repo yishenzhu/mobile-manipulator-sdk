@@ -96,10 +96,11 @@ TEST_F(TransformTest, MissingFrameBecomesUnavailableError) {
 /// 这是"查不到"之外的另一半 —— 光测失败路径不算覆盖。
 TEST_F(TransformTest, LookupSucceedsWithPublishedStaticTransform) {
   auto node = std::make_shared<rclcpp::Node>("tf_static_test");
-  // 先把节点的执行器起起来，/tf 订阅才有线程去收。
-  NodeSpinner spinner(node);
-
   TransformManager tf(node);
+  // ⚠️ spinner 必须声明在 `tf` **之后**：析构是逆序的，这样它会先停下来，
+  //    否则 `tf`（连同它的 buffer/订阅）先析构，而 spin 线程可能正在执行它的回调
+  //    ⇒ 悬垂访问（TSan 实测报过 data race）。
+  NodeSpinner spinner(node);
   auto broadcaster = std::make_shared<tf2_ros::StaticTransformBroadcaster>(node);
 
   geometry_msgs::msg::TransformStamped t;

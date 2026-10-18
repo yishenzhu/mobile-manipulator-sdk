@@ -264,7 +264,7 @@ TEST_F(NavigationApiTest, CancelWaitsForResponseWhenAccepted) {
 
 // cancelAll 要能容忍"登记过的句柄已经析构"：会同时走 prune（expired）和"锁外取消"。
 TEST_F(NavigationApiTest, CancelAllToleratesDroppedGoalHandles) {
-  Harness h(/*publish_tf=*/true, "fake_navigate_to_pose", /*hold_s=*/1.0);
+  Harness h(/*publish_tf=*/true, "fake_navigate_to_pose", /*hold_s=*/30.0);
   NavigationAPI nav(h.node, h.group, h.transform, fakeServerConfig());
 
   ASSERT_TRUE(nav.serverAvailable(2s));

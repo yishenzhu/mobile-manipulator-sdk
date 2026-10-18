@@ -1,0 +1,11 @@
+# ThreadSanitizer 抑制规则
+#
+# 为什么需要：TSan 只能看见**用 TSan 编译过的**代码里的同步。像 libtf2.so 这种系统里的
+# 预编译库，它内部的 mutex 对 TSan **不可见** ⇒ 会把"库内部有锁保护的访问"报成竞争。
+#
+# 具体这一条：tf2 的 buffer 在内部线程里写入、主线程 `canTransform()` 查询；
+# tf2 自己有锁，但 TSan 看不到 ⇒ 报告落在 memcmp（读 buffer 的键）上，
+# 两侧分别是 `libtf2.so` 内部 与 `tf2_ros::TransformListener` 的订阅回调。
+#
+# 语法：<类型>:<符号名子串>（TSan 按**栈里的符号**匹配，不是按 .so 文件名）
+race:memcmp

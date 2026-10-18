@@ -1,6 +1,9 @@
 /build
 /install
 /log
+# colcon 的变体工作空间（如 build-asan / install-asan：sanitizer 构建用）
+/build-*
+/install-*
 .clangd
 .localrc
 学习笔记.md

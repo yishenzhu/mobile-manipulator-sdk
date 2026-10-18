@@ -66,3 +66,42 @@ jobs:
           path: |
             log/
             build/**/test_results/
+
+  # 独立 job：sanitizer 构建 + 跑核心测试。和主 job 分开是因为它要重编一遍（慢），
+  # 而且失败原因完全不同（内存错误 / 数据竞争 vs 逻辑错误）—— 混在一起看不出是谁的问题。
+  sanitizers:
+    runs-on: ubuntu-24.04
+    container: ros:jazzy
+    timeout-minutes: 60
+    steps:
+      - name: 确保 git 可用
+        run: command -v git >/dev/null || (apt-get update && apt-get install -y --no-install-recommends git)
+
+      - uses: actions/checkout@v4
+
+      - name: 装依赖（rosdep）
+        run: |
+          rosdep init || true
+          rosdep update
+          rosdep install --from-paths src --ignore-src -r -y
+
+      - name: ASan + UBSan（内存错误 / 未定义行为）
+        run: |
+          ./scripts/build_sanitizers.sh address,undefined
+          ./scripts/run_sanitizer_tests.sh asan
+
+      - name: TSan（数据竞争）
+        # ⚠️ TSan 在新内核上会 FATAL: unexpected memory mapping（ASLR 位数偏大）——
+        #    run_sanitizer_tests.sh 里已经用 `setarch -R` 绕开，不需要 root。
+        run: |
+          ./scripts/build_sanitizers.sh thread
+          ./scripts/run_sanitizer_tests.sh tsan
+
+      - name: 失败时上传日志
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sanitizer-logs
+          if-no-files-found: ignore
+          path: |
+            log/
