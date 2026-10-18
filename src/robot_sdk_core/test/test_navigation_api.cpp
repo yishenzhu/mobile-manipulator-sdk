@@ -1,9 +1,12 @@
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <chrono>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp/executors/multi_threaded_executor.hpp>
@@ -105,16 +108,26 @@ class FakeNavigateServer {
           cancel_seen.fetch_add(1);
           return rclcpp_action::CancelResponse::ACCEPT;
         },
-        [hold_s](const std::shared_ptr<GoalHandle> handle) {
-          std::thread([handle, hold_s]() {
+        [this, hold_s](const std::shared_ptr<GoalHandle> handle) {
+          // ⚠️ 线程必须**可叫停、可 join**，不能 detach：
+          //    它握着 goal handle（内部会 lock 弱引用去碰 action server），而 `~Harness` 会销毁
+          //    node / server —— 一边 delete Server、一边 weak_ptr::lock() 就是 TSan 报过的那条竞争。
+          std::lock_guard<std::mutex> lock(threads_mutex_);
+          goal_threads_.emplace_back([this, handle, hold_s]() {
             const auto deadline =
                 std::chrono::steady_clock::now() + std::chrono::duration<double>(hold_s);
-            while (std::chrono::steady_clock::now() < deadline) {
+            while (!stopping_.load()) {
               if (handle->is_canceling()) {
                 handle->canceled(std::make_shared<Action::Result>());
                 return;
               }
+              if (std::chrono::steady_clock::now() >= deadline) {
+                break;
+              }
               std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            }
+            if (stopping_.load()) {
+              return;  // 正在收摊：别再碰 handle / server
             }
             // 立刻"成功"，但机器人一步都没动 —— 这就是要复现的那类服务端。
             auto result = std::make_shared<Action::Result>();
@@ -122,12 +135,25 @@ class FakeNavigateServer {
             result->final_distance_error = 0.0f;
             result->message = "reached target";
             handle->succeed(result);
-          }).detach();
+          });
         });
+  }
+
+  ~FakeNavigateServer() {
+    stopping_.store(true);
+    std::lock_guard<std::mutex> lock(threads_mutex_);
+    for (auto& thread : goal_threads_) {
+      if (thread.joinable()) {
+        thread.join();
+      }
+    }
   }
 
  private:
   rclcpp_action::Server<Action>::SharedPtr server_;
+  std::atomic<bool> stopping_{false};
+  std::mutex threads_mutex_;
+  std::vector<std::thread> goal_threads_;
 };
 
 geometry_msgs::msg::TransformStamped originTransform() {
