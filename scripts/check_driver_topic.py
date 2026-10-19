@@ -49,6 +49,8 @@ def main():
                     help="TF 检查的基准帧（默认 base_footprint）")
     ap.add_argument("--window", type=float, default=3.0, help="采样窗口时长（秒）")
     ap.add_argument("--timeout", type=float, default=15.0, help="整体超时（秒）")
+    ap.add_argument("--ignore-clock", action="store_true",
+                    help="跳过时钟源/延迟检查（用 ros2 topic pub 造数据时必需：它不填 stamp）")
     args = ap.parse_args()
 
     rclpy.init()
@@ -151,16 +153,21 @@ def main():
     # 系统是不是在跑 sim 时间？/clock 有发布者就说明"整个系统用仿真时钟" ⇒
     # 那么本工具（按墙钟比）差出 1.7e9 s 是**正常现象**，不是驱动的问题 ✓。
     sim_time = bool(node.get_publishers_info_by_topic("/clock"))
+    # 话题类型是**运行时**从发布者拿的 ⇒ 不能假定消息有 header（`std_msgs/String` 之类就没有）；
+    # 但只要有 header，`stamp`/`frame_id` 必定存在（`std_msgs/Header` 的字段）⇒ 只探测这一层。
+    header = getattr(samples[-1][1], "header", None)
+    stamp = header.stamp if header is not None else None
+    frame_id = header.frame_id if header is not None else None
 
-    last = samples[-1][1]
-    stamp = getattr(getattr(last, "header", None), "stamp", None)
-    if stamp is None:
+    if args.ignore_clock:
+        # ⚠️ `ros2 topic pub` 造的数据**不填 stamp**（实测 sec=0）⇒ 这两项没有意义。
+        report(WARN, "时钟源", "按 --ignore-clock 跳过（CLI 造的数据不带时间戳）")
+        report(WARN, "端到端延迟", "跳过（同上）")
+    elif stamp is None:
         report(WARN, "时间戳", "消息没有 header.stamp ⇒ 判不了时钟源，也只能靠到达时刻估延迟")
-        frame_id = None
     else:
         now_s = node.get_clock().now().nanoseconds * 1e-9
         age = now_s - duration_to_sec(stamp)
-        frame_id = last.header.frame_id
         if abs(age) <= 1.0:
             report(OK, "时钟源", f"与本机墙钟差 {age * 1000:+.0f} ms（同一时钟源）")
             report(OK, "端到端延迟", f"最新一条 {age * 1000:+.0f} ms")
@@ -174,13 +181,10 @@ def main():
                    f"时间戳与本机差 {age:+.1f} s，且**没有** /clock 发布者 ⇒ 驱动与消费方时钟源不一致"
                    "（一方 sim 时间、一方墙钟）✗")
             report(WARN, "端到端延迟", "跳过（时钟源不同）")
-    if frame_id is None:
-        frame_id = "--frame 未指定"
-
     # ── 5. frame_id 在不在 TF 树里 ────────────────────────────────────────
-    if isinstance(frame_id, str) and frame_id.startswith("--"):
+    if not frame_id:
         report(WARN, "TF", "消息没带 frame_id ⇒ 跳过")
-    elif frame_id:
+    else:
         buffer = tf2_ros.Buffer()
         tf2_ros.TransformListener(buffer, node)
         found = False

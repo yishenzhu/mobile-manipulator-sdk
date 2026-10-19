@@ -42,11 +42,11 @@ def generate_launch_description():
                               description="true ⇒ 起 slam_toolbox（发 map→odom 并建图）"),
         DeclareLaunchArgument("headless", default_value="true",
                               description="Gazebo 是否无界面（演示时可 false）"),
-        OpaqueFunction(function=_setup),
+        OpaqueFunction(function=setup_nodes),
     ])
 
 
-def _setup(context):
+def setup_nodes(context):
     be = LaunchConfiguration("backend").perform(context)
     slam = LaunchConfiguration("slam").perform(context) == "true"
     headless = LaunchConfiguration("headless").perform(context)
