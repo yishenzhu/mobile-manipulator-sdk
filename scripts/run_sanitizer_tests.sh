@@ -29,7 +29,13 @@ source "$INSTALL_DIR/setup.bash"
 if [ "$MODE" = "tsan" ]; then
   # tsan.supp 只压"TSan 看不见的预编译库内部同步"（libtf2.so）产生的假阳性 —— 见该文件里的说明。
   export TSAN_OPTIONS="halt_on_error=0:second_deadlock_stack=1:suppressions=$WS/scripts/tsan.supp"
+  # ⚠️ 地址空间问题有两个解法：`setarch -R`（关 ASLR）或调小 `vm.mmap_rnd_bits`（要 root）。
+  #    容器里 `setarch` 可能被 seccomp 拦（personality 被禁）⇒ 先试 sysctl；成功就不用 setarch。
   LAUNCH=(setarch -R)
+  if sysctl -w vm.mmap_rnd_bits=28 >/dev/null 2>&1; then
+    echo "  （已 sysctl vm.mmap_rnd_bits=28 ⇒ 不需要 setarch -R）"
+    LAUNCH=()
+  fi
   PATTERN="WARNING: ThreadSanitizer"
 else
   export ASAN_OPTIONS="detect_leaks=0:abort_on_error=0:print_stacktrace=1:halt_on_error=0"
