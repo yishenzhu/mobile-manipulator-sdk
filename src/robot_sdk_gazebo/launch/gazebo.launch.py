@@ -104,37 +104,25 @@ def generate_launch_description():
     # ⚠️ gz_ros2_control 的插件只建 controller_manager，**不自动加载控制器** ⇒ 还得用 spawner 起。
     #    ⚠️ 必须用 ExecuteProcess：launch_ros 的 Node 会往命令行尾部补一个光秃秃的 `--ros-args`，
     #    spawner 会把它当成"--params-file 缺路径"直接退出。
-    spawn_broadcaster = ExecuteProcess(
-        cmd=["ros2", "run", "controller_manager", "spawner", "joint_state_broadcaster",
-             "--controller-manager", "/controller_manager",
-             "--controller-manager-timeout", "60",
-             "--service-call-timeout", "60",
-             "--switch-timeout", "60"],
-        output="screen",
-    )
-    spawn_arm = ExecuteProcess(
-        cmd=["ros2", "run", "controller_manager", "spawner", "arm_controller",
-             "--controller-manager", "/controller_manager",
-             "--controller-manager-timeout", "60",
-             "--service-call-timeout", "60",
-             "--switch-timeout", "60"],
-        output="screen",
-    )
+    def spawner(controller, extra_args=()):
+        return ExecuteProcess(
+            cmd=["ros2", "run", "controller_manager", "spawner", controller,
+                 "--controller-manager", "/controller_manager",
+                 "--controller-manager-timeout", "60",
+                 "--service-call-timeout", "60",
+                 "--switch-timeout", "60", *extra_args],
+            output="screen",
+        )
+
+    spawn_broadcaster = spawner("joint_state_broadcaster")
+    spawn_arm = spawner("arm_controller")
     # 底盘：标准 diff_drive_controller（原来由 gz 的 DiffDrive 插件驱动）。
-    # ⚠️ 控制器的话题是 **~/cmd_vel** 和 **~/odom**（节点名带控制器名 ⇒
-    #    /diff_drive_controller/cmd_vel），所以必须重映射回 /cmd_vel、/odom ——
-    #    Nav2 与 odom_tf_broadcaster 认的是后面这两个名字。
-    #    ⚠️ 只给控制器传 remap 要用 spawner 的 --controller-ros-args：
-    #    controller_manager 自己带 --remap 已经**废弃**（会警告），别用那个。
-    spawn_diff_drive = ExecuteProcess(
-        cmd=["ros2", "run", "controller_manager", "spawner", "diff_drive_controller",
-             "--controller-manager", "/controller_manager",
-             "--controller-manager-timeout", "60",
-             "--service-call-timeout", "60",
-             "--switch-timeout", "60",
-             "--controller-ros-args", "-r ~/cmd_vel:=/cmd_vel -r ~/odom:=/odom"],
-        output="screen",
-    )
+    # ⚠️ 控制器话题是 ~/cmd_vel / ~/odom（节点名带控制器名）⇒ 必须重映射回 /cmd_vel、/odom，
+    #    否则 Nav2 与 odom_tf_broadcaster 都认不出。只给控制器传 remap 要用
+    #    spawner 的 --controller-ros-args（controller_manager 自己的 --remap 已废弃）。
+    spawn_diff_drive = spawner(
+        "diff_drive_controller",
+        ["--controller-ros-args", "-r ~/cmd_vel:=/cmd_vel -r ~/odom:=/odom"])
 
     return LaunchDescription([
         DeclareLaunchArgument(
