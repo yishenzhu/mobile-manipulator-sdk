@@ -1,5 +1,11 @@
 name: ci
 
+# ⚠️ 容器里的默认 shell 是 **sh**（不是 bash）⇒ `source` 不是命令，步骤会以 127 失败（实测）。
+#    统一用 bash：所有步骤都写了 ROS 的 setup.bash，sh 下根本跑不起来。
+defaults:
+  run:
+    shell: bash
+
 # 门禁：能干净地构建 + 全量 colcon test 绿；另有一条**独立的**仿真冒烟 job。
 #   - Gazebo 那条**不在 colcon test 里**（要 ~1 GB 内存、几十秒、依赖 GL 上下文，又慢又抖，见 README），
 #     改成独立 job `sim-smoke`：只做**结构断言**（控制器 active / 里程计前进 / 桥有数据），不碰精度
