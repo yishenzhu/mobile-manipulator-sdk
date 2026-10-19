@@ -115,16 +115,30 @@ jobs:
           printf '%s\n' "$out" | tail -5
 
       - name: ASan + UBSan（内存错误 / 未定义行为）
+        # 失败时把原话做成 annotation（公开仓库下载日志要 token）—— 同"装依赖"那步。
         run: |
-          ./scripts/build_sanitizers.sh address,undefined
-          ./scripts/run_sanitizer_tests.sh asan
+          if ! out="$( { ./scripts/build_sanitizers.sh address,undefined && ./scripts/run_sanitizer_tests.sh asan; } 2>&1 )"; then
+            printf '%s\n' "$out" | tail -30
+            printf '%s\n' "$out" | tail -8 | while IFS= read -r line; do
+              printf '::error::%s\n' "$(printf '%s' "$line" | tr -d '\r')"
+            done
+            exit 1
+          fi
+          printf '%s\n' "$out" | tail -5
 
       - name: TSan（数据竞争）
-        # ⚠️ TSan 在新内核上会 FATAL: unexpected memory mapping（ASLR 位数偏大）——
-        #    run_sanitizer_tests.sh 里已经用 `setarch -R` 绕开，不需要 root。
+        # ⚠️ TSan 在新内核/容器上会 FATAL: unexpected memory mapping（ASLR 位数偏大）——
+        #    run_sanitizer_tests.sh 里先探测 `setarch -R`，不可用才退 sysctl。
+        # 失败时把原话做成 annotation（公开仓库下载日志要 token）。
         run: |
-          ./scripts/build_sanitizers.sh thread
-          ./scripts/run_sanitizer_tests.sh tsan
+          if ! out="$( { ./scripts/build_sanitizers.sh thread && ./scripts/run_sanitizer_tests.sh tsan; } 2>&1 )"; then
+            printf '%s\n' "$out" | tail -30
+            printf '%s\n' "$out" | tail -8 | while IFS= read -r line; do
+              printf '::error::%s\n' "$(printf '%s' "$line" | tr -d '\r')"
+            done
+            exit 1
+          fi
+          printf '%s\n' "$out" | tail -5
 
       - name: 失败时上传日志
         if: failure()

@@ -29,12 +29,17 @@ source "$INSTALL_DIR/setup.bash"
 if [ "$MODE" = "tsan" ]; then
   # tsan.supp 只压"TSan 看不见的预编译库内部同步"（libtf2.so）产生的假阳性 —— 见该文件里的说明。
   export TSAN_OPTIONS="halt_on_error=0:second_deadlock_stack=1:suppressions=$WS/scripts/tsan.supp"
-  # ⚠️ 地址空间问题有两个解法：`setarch -R`（关 ASLR）或调小 `vm.mmap_rnd_bits`（要 root）。
-  #    容器里 `setarch` 可能被 seccomp 拦（personality 被禁）⇒ 先试 sysctl；成功就不用 setarch。
+  # ⚠️ 地址空间问题有两条路：`setarch -R`（关 ASLR）或调小 `vm.mmap_rnd_bits`（要 root）。
+  #    顺序**不能反**：实测本机 sysctl 会"成功"但 TSan 仍然 16 个全崩，而 setarch 有效。
+  #    容器里 setarch 可能被 seccomp 拦（personality 被禁）⇒ 先探测，能用就用它，不能用才退 sysctl。
   LAUNCH=(setarch -R)
-  if sysctl -w vm.mmap_rnd_bits=28 >/dev/null 2>&1; then
-    echo "  （已 sysctl vm.mmap_rnd_bits=28 ⇒ 不需要 setarch -R）"
-    LAUNCH=()
+  if ! setarch -R true >/dev/null 2>&1; then
+    if sysctl -w vm.mmap_rnd_bits=28 >/dev/null 2>&1; then
+      echo "  （setarch 不可用 ⇒ 已改 sysctl vm.mmap_rnd_bits=28）"
+      LAUNCH=()
+    else
+      echo "  ⚠️ setarch 不可用且 sysctl 失败 ⇒ TSan 很可能起不来" >&2
+    fi
   fi
   PATTERN="WARNING: ThreadSanitizer"
 else
