@@ -1,0 +1,34 @@
+name: setup-ros
+description: 刷新 apt 索引 + rosdep 装依赖（三个 job 共用一份逻辑）；可选装软件渲染
+
+# ⚠️ 只能在 `actions/checkout` **之后**用（本地 action 需要仓库已在工作区）。
+# ⚠️ composite 里的 run 必须显式写 shell —— 容器默认是 sh，`source` 会 127（实测）。
+inputs:
+  render:
+    description: 是否装软件渲染（无 GPU 的 runner 跑 Gazebo 时需要）
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: 装依赖（rosdep）
+      shell: bash
+      # 实测教训：镜像的 apt 索引可能是空的 ⇒ 先 apt-get update。
+      # 失败时把原话做成 ::error:: annotation —— 公开仓库下载 job 日志要 token，annotation 是唯一公开可读的路。
+      run: |
+        rosdep init || true
+        apt-get update -qq
+        if ! out="$( { rosdep update && rosdep install --from-paths src --ignore-src -r -y; } 2>&1 )"; then
+          printf '%s\n' "$out" | tail -20
+          printf '%s\n' "$out" | tail -8 | while IFS= read -r line; do
+            printf '::error::%s\n' "$(printf '%s' "$line" | tr -d '\r')"
+          done
+          exit 1
+        fi
+        printf '%s\n' "$out" | tail -5
+
+    - name: 装软件渲染（无 GPU 的 runner）
+      if: inputs.render == 'true'
+      shell: bash
+      # gz 的激光/深度相机是渲染式的，缺 GL 会刷错误并拖慢启动；显式要 llvmpipe，别赌默认 renderer。
+      run: apt-get update -qq && apt-get install -y --no-install-recommends libgl1-mesa-dri libegl1

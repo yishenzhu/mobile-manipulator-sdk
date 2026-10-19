@@ -1,20 +1,19 @@
 name: ci
 
 # ⚠️ 容器里的默认 shell 是 **sh**（不是 bash）⇒ `source` 不是命令，步骤会以 127 失败（实测）。
-#    统一用 bash：所有步骤都写了 ROS 的 setup.bash，sh 下根本跑不起来。
 defaults:
   run:
     shell: bash
 
-# 门禁：能干净地构建 + 全量 colcon test 绿；另有一条**独立的**仿真冒烟 job。
-#   - Gazebo 那条**不在 colcon test 里**（要 ~1 GB 内存、几十秒、依赖 GL 上下文，又慢又抖，见 README），
-#     改成独立 job `sim-smoke`：只做**结构断言**（控制器 active / 里程计前进 / 桥有数据），不碰精度
-#   - Nav2 整栈与真栈（ros2_control + move_group）**在** colcon test 里面 —— 依赖由 rosdep 一次装齐
+# 门禁：能干净构建 + 全量 colcon test 绿；另有两条**独立** job（失败原因不同，混在一起看不出是谁）。
+#   - sanitizers：ASan/UBSan + TSan（要重编两遍，慢）
+#   - sim-smoke：Gazebo headless 冒烟（要 ~1 GB 内存 + GL，精度依赖物理 ⇒ 不并进 colcon test）
+# 依赖安装、失败上报都只有**一份**：`.github/actions/setup-ros` 与 `scripts/ci_run.sh`。
 #
 # 还没做的（见 README 的"改进方向"）：
-#   1. lint 未进门禁 —— 仓库目前没配 ament_lint/.clang-format，先让测试这条真跑起来
-#   2. 没做依赖缓存 —— rosdep 每次会重拉 MoveIt/Nav2，慢；可换 ros-tooling/setup-ros
-#   3. 没做版本/CHANGELOG（tag + 语义化版本）
+#   1. lint 未进门禁 —— 仓库目前没配 ament_lint/.clang-format
+#   2. 没做依赖缓存 —— rosdep 每次会重拉 MoveIt/Nav2；可换 ros-tooling/setup-ros
+#   3. 没做版本/CHANGELOG 的 tag
 
 on:
   push:
@@ -22,7 +21,7 @@ on:
   pull_request:
 
 env:
-  # 固定域 + 限本机：runner 上的 DDS 组播不稳，这样行为才可复现。
+  # 固定域 + 限本机：runner 上 DDS 组播不稳，这样行为才可复现。
   ROS_DOMAIN_ID: "42"
   ROS_LOCALHOST_ONLY: "1"
 
@@ -32,49 +31,23 @@ jobs:
     container: ros:jazzy
     timeout-minutes: 60
     steps:
-      # 容器里 actions/checkout 自己要用 git。ros:jazzy 一般不缺，但缺了就是
-      # "第一步就红"、且报错看不出来 —— 三行兜底比事后排查便宜。
-      - name: 确保 git 可用
-        run: command -v git >/dev/null || (apt-get update && apt-get install -y --no-install-recommends git)
-
       - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-ros
 
-      # 最便宜的一关先跑：纯文本检查，不用装依赖、不用构建 —— 破坏性改动在这里就红，
-      # 不必等 2 分钟构建完。政策见 docs/contract.md。
+      # 最便宜的一关先跑：纯文本检查，不用装依赖、不用构建（政策见 docs/contract.md）。
       - name: 契约检查（版本一致 + 接口只增不删）
         run: python3 scripts/check_contract.py
-
-      - name: 装依赖（rosdep）
-        # ⚠️ 两条实测教训：
-        # 1) 容器里默认 shell 不是 bash（没有 PIPESTATUS）⇒ 这里只用 POSIX；
-        # 2) `ros:jazzy` 镜像的 apt 索引可能是空的 ⇒ rosdep 装系统包前必须先 `apt-get update`。
-        # 失败时把原话做成 annotation（`::error::`）—— 公开仓库下载日志要 token，这是唯一能公开读到的路。
-        run: |
-          rosdep init || true
-          apt-get update -qq
-          if ! out="$( { rosdep update && rosdep install --from-paths src --ignore-src -r -y; } 2>&1 )"; then
-            printf '%s\n' "$out" | tail -20
-            printf '%s\n' "$out" | tail -8 | while IFS= read -r line; do
-              printf '::error::%s\n' "$(printf '%s' "$line" | tr -d '\r')"
-            done
-            exit 1
-          fi
-          printf '%s\n' "$out" | tail -5
 
       - name: 构建
         run: |
           source /opt/ros/jazzy/setup.bash
-          # console_cohesion：一个包的输出聚在一起，日志好读
           colcon build --symlink-install --event-handlers console_cohesion+
 
       - name: 测试
-        # 脚本自己 source ROS、按时间戳留档每份结果、并把失败的测试名打出来（见脚本头部）。
-        # ⚠️ 单 worker：Nav2 整栈 + 真栈（ros2_control + move_group）同时跑会互相挤，
-        #    而几条探针是按时序判定的（真栈一条就要 ~30 s）。慢一点，但结论可信。
-        run: ./scripts/run_tests.sh --parallel-workers 1
+        # ⚠️ 单 worker：Nav2 整栈与真栈（ros2_control + move_group）同时跑会互相挤，
+        #    有几条探针按时序判定（真栈一条 ~30 s）。慢一点，但结论可信。
+        run: ./scripts/ci_run.sh 测试 ./scripts/run_tests.sh --parallel-workers 1
 
-      # 失败必须留证据：colcon 的原始日志 + 每个包的 test_results。
-      # 没有它，CI 红了只能看到一句摘要，还得本地复现才知道是谁挂的。
       - name: 失败时上传日志
         if: failure()
         uses: actions/upload-artifact@v4
@@ -86,59 +59,22 @@ jobs:
             build/**/test_results/
 
   # 独立 job：sanitizer 构建 + 跑核心测试。和主 job 分开是因为它要重编一遍（慢），
-  # 而且失败原因完全不同（内存错误 / 数据竞争 vs 逻辑错误）—— 混在一起看不出是谁的问题。
+  # 而且失败原因完全不同（内存错误 / 数据竞争 vs 逻辑错误）。
   sanitizers:
     runs-on: ubuntu-24.04
     container: ros:jazzy
     timeout-minutes: 60
     steps:
-      - name: 确保 git 可用
-        run: command -v git >/dev/null || (apt-get update && apt-get install -y --no-install-recommends git)
-
       - uses: actions/checkout@v4
-
-      - name: 装依赖（rosdep）
-        # ⚠️ 两条实测教训：
-        # 1) 容器里默认 shell 不是 bash（没有 PIPESTATUS）⇒ 这里只用 POSIX；
-        # 2) `ros:jazzy` 镜像的 apt 索引可能是空的 ⇒ rosdep 装系统包前必须先 `apt-get update`。
-        # 失败时把原话做成 annotation（`::error::`）—— 公开仓库下载日志要 token，这是唯一能公开读到的路。
-        run: |
-          rosdep init || true
-          apt-get update -qq
-          if ! out="$( { rosdep update && rosdep install --from-paths src --ignore-src -r -y; } 2>&1 )"; then
-            printf '%s\n' "$out" | tail -20
-            printf '%s\n' "$out" | tail -8 | while IFS= read -r line; do
-              printf '::error::%s\n' "$(printf '%s' "$line" | tr -d '\r')"
-            done
-            exit 1
-          fi
-          printf '%s\n' "$out" | tail -5
+      - uses: ./.github/actions/setup-ros
 
       - name: ASan + UBSan（内存错误 / 未定义行为）
-        # 失败时把原话做成 annotation（公开仓库下载日志要 token）—— 同"装依赖"那步。
-        run: |
-          if ! out="$( { ./scripts/build_sanitizers.sh address,undefined && ./scripts/run_sanitizer_tests.sh asan; } 2>&1 )"; then
-            printf '%s\n' "$out" | tail -30
-            printf '%s\n' "$out" | tail -8 | while IFS= read -r line; do
-              printf '::error::%s\n' "$(printf '%s' "$line" | tr -d '\r')"
-            done
-            exit 1
-          fi
-          printf '%s\n' "$out" | tail -5
+        run: ./scripts/ci_run.sh ASan bash -c './scripts/build_sanitizers.sh address,undefined && ./scripts/run_sanitizer_tests.sh asan'
 
       - name: TSan（数据竞争）
-        # ⚠️ TSan 在新内核/容器上会 FATAL: unexpected memory mapping（ASLR 位数偏大）——
-        #    run_sanitizer_tests.sh 里先探测 `setarch -R`，不可用才退 sysctl。
-        # 失败时把原话做成 annotation（公开仓库下载日志要 token）。
-        run: |
-          if ! out="$( { ./scripts/build_sanitizers.sh thread && ./scripts/run_sanitizer_tests.sh tsan; } 2>&1 )"; then
-            printf '%s\n' "$out" | tail -30
-            printf '%s\n' "$out" | tail -8 | while IFS= read -r line; do
-              printf '::error::%s\n' "$(printf '%s' "$line" | tr -d '\r')"
-            done
-            exit 1
-          fi
-          printf '%s\n' "$out" | tail -5
+        # TSan 在新内核/容器上会 FATAL: unexpected memory mapping ——
+        # run_sanitizer_tests.sh 里先探测 `setarch -R`，不可用才退 sysctl。
+        run: ./scripts/ci_run.sh TSan bash -c './scripts/build_sanitizers.sh thread && ./scripts/run_sanitizer_tests.sh tsan'
 
       - name: 失败时上传日志
         if: failure()
@@ -149,44 +85,17 @@ jobs:
           path: |
             log/
 
-  # 独立 job：Gazebo headless 冒烟。为什么不并进主 job 的 colcon test 见文件头与
-  # robot_sdk_gazebo/README：它要 ~1 GB 内存、几十秒，而且渲染式传感器依赖 GL 上下文。
-  # 这里只验证"驱动链真的通了"（控制器 active / 里程计前进 / gz→ROS 桥有数据），
-  # 不验证精度 —— 仿真的物理精度会抖，拿它当门禁必然假红。
+  # 独立 job：Gazebo headless 冒烟。为什么不并进 colcon test 见 robot_sdk_gazebo/README。
+  # 只验证"驱动链真的通了"（控制器 active / 里程计前进 / gz→ROS 桥有数据），不验证精度。
   sim-smoke:
     runs-on: ubuntu-24.04
     container: ros:jazzy
     timeout-minutes: 30
     steps:
-      - name: 确保 git 可用
-        run: command -v git >/dev/null || (apt-get update && apt-get install -y --no-install-recommends git)
-
       - uses: actions/checkout@v4
-
-      - name: 装依赖（rosdep）
-        # ⚠️ 两条实测教训：
-        # 1) 容器里默认 shell 不是 bash（没有 PIPESTATUS）⇒ 这里只用 POSIX；
-        # 2) `ros:jazzy` 镜像的 apt 索引可能是空的 ⇒ rosdep 装系统包前必须先 `apt-get update`。
-        # 失败时把原话做成 annotation（`::error::`）—— 公开仓库下载日志要 token，这是唯一能公开读到的路。
-        run: |
-          rosdep init || true
-          apt-get update -qq
-          if ! out="$( { rosdep update && rosdep install --from-paths src --ignore-src -r -y; } 2>&1 )"; then
-            printf '%s\n' "$out" | tail -20
-            printf '%s\n' "$out" | tail -8 | while IFS= read -r line; do
-              printf '::error::%s\n' "$(printf '%s' "$line" | tr -d '\r')"
-            done
-            exit 1
-          fi
-          printf '%s\n' "$out" | tail -5
-
-      # runner 没有 GPU：gz 的激光/深度相机是**渲染式**的，缺 GL 会刷一堆错误并拖慢启动。
-      # 装完再显式要求软件光栅化（llvmpipe），别去赌默认选到哪个 renderer。
-      # （冒烟本身用纯物理的 /imu 判定，不依赖渲染 —— 判据不会因为渲染失败而假红。）
-      - name: 装软件渲染（无 GPU 的 runner）
-        run: |
-          apt-get update && apt-get install -y --no-install-recommends \
-            libgl1-mesa-dri libegl1
+      - uses: ./.github/actions/setup-ros
+        with:
+          render: "true"
 
       - name: 构建（仿真栈最少需要的那些包）
         run: |
@@ -196,7 +105,7 @@ jobs:
       - name: 冒烟（起 headless 仿真 + 断言驱动链）
         env:
           LIBGL_ALWAYS_SOFTWARE: "1"
-        run: ./scripts/run_sim_smoke.sh
+        run: ./scripts/ci_run.sh 冒烟 ./scripts/run_sim_smoke.sh
 
       - name: 失败时上传日志
         if: failure()
