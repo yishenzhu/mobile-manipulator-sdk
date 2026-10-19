@@ -412,7 +412,7 @@ flowchart LR
 
 | 文件 | 职责 | 要点 |
 |---|---|---|
-| `launch/navigation.launch.py` | 起 **mock + nav2_adapter + 5 个 Nav2 节点 + lifecycle_manager** | 激活顺序：`map_server` 必须**最前**（static_layer 要等地图）|
+| `launch/navigation.launch.py` | **一份节点清单，三种拓扑**（`backend:=mock\|gazebo` × `slam:=bool`）：被控对象（mock 节点或 gz）+ nav2_adapter + 4~5 个 Nav2 节点 + lifecycle_manager | 激活顺序：`map_server` 必须**最前**（static_layer 要等地图），SLAM 模式下它不在清单里（地图由 `slam_toolbox` 提供）；`use_sim_time` 按 backend **只算一次**并注入所有节点；⚠️ 本机内存 <2 GB 时别同时起 nav2 + gz + slam（gz 会段错误）|
 | `config/nav2_params.yaml` | 全部 Nav2 参数 | 见下表 |
 | `maps/room.pgm` + `maps/room.yaml` | 预置静态地图 | 220×180 px @0.05 m/px = **11×9 m**，origin `[-5.5,-4.5,0]` |
 | `maps/make_room_map.py` | 按 mock 的房间常量生成地图 | `HALF_W=5, HALF_H=4, RES=0.05, MARGIN=0.5` → 尺寸必须与 mock 的 `kRoomHalf*` 一致 |

@@ -1,0 +1,13 @@
+# slam_toolbox 的最小参数：只钉与本项目相关的键，其余走上游默认（升级也不会被我们的副本拖住）。
+# use_sim_time 不写在这里 —— 它由 launch 按 backend 注入（同一份真相）。
+slam_toolbox:
+  ros__parameters:
+    mode: mapping
+    odom_frame: odom
+    map_frame: map
+    base_frame: base_footprint
+    scan_topic: /scan
+    resolution: 0.05
+    # 仿真雷达 10 Hz、底盘 ≤0.3 m/s ⇒ 比默认 0.5 m 更勤地匹配，建图不至于拉丝。
+    minimum_travel_distance: 0.2
+    minimum_travel_heading: 0.2
