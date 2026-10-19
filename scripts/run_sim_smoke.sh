@@ -47,19 +47,30 @@ sample_odom_x() {
   return 1
 }
 
-# ── 1. 三个控制器都得到 active（逐个点名，别只数个数：会漏"少一个多一个"）──
-note "等控制器 active（最多 90 s）"
+# ── 1. 控制器都得到 active ────────────────────────────────────────────────────
+# 名单**从 ros2_control.yaml 读**（同一份真相，不再在这里维护第二份副本；
+# 跨文件的绑定由 scripts/check_sim_consistency.py 兜底）。
+# 逐个点名而不是数个数：README 记过"看着活着、实则半配置"（控制器加载了但没激活）。
+controllers=$(python3 - "$WS/src/robot_description/config/ros2_control.yaml" <<'PY'
+import sys
+import yaml
+
+cm = yaml.safe_load(open(sys.argv[1]))["controller_manager"]["ros__parameters"]
+print(" ".join(sorted(k for k, v in cm.items() if isinstance(v, dict) and "type" in v)))
+PY
+)
+note "等控制器 active（最多 90 s）：$controllers"
 list=""
 for _ in $(seq 1 90); do
   list="$(ros2 control list_controllers 2>/dev/null || true)"
-  if echo "$list" | grep -q "^diff_drive_controller .*active" &&
-     echo "$list" | grep -q "^arm_controller .*active" &&
-     echo "$list" | grep -q "^joint_state_broadcaster .*active"; then
-    break
-  fi
+  missing=no
+  for c in $controllers; do
+    if ! echo "$list" | grep -q "^$c .*active"; then missing=yes; break; fi
+  done
+  [ "$missing" = no ] && break
   sleep 1
 done
-for c in joint_state_broadcaster arm_controller diff_drive_controller; do
+for c in $controllers; do
   if echo "$list" | grep -q "^$c .*active"; then
     ok "$c active"
   else

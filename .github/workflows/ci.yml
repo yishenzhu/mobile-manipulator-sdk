@@ -38,6 +38,10 @@ jobs:
       - name: 契约检查（版本一致 + 接口只增不删）
         run: python3 scripts/check_contract.py
 
+      # 语义一致性：关节名单、控制器集合这些"同一概念的多份副本"必须对得上（见脚本头部）。
+      - name: 仿真侧一致性检查
+        run: python3 scripts/check_sim_consistency.py
+
       - name: 构建
         run: |
           source /opt/ros/jazzy/setup.bash
